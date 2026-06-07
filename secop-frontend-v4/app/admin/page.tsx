@@ -19,13 +19,6 @@ import {
 const ADMIN_PASS = "admin2024oc"
 const ETAPAS = ["Análisis", "Tu aprobación", "Organización", "Presentación", "Resultado"]
 
-// Lista de códigos UNSPC que el admin puede asignar al cliente (puedes ampliarla)
-const CODIGOS_UNSPC_DISPONIBLES = [
-  "8016", "8111", "7210", "7211", "7212", "7213", "7214", "7215",
-  "8110", "8114", "5216", "8310", "1411", "4410", "4412", "4321",
-  "4323", "5610"
-]
-
 const DEPARTAMENTOS_CO = [
   "Amazonas","Antioquia","Arauca","Atlántico","Bolívar","Boyacá","Caldas","Caquetá",
   "Casanare","Cauca","Cesar","Chocó","Córdoba","Cundinamarca","Guainía","Guaviare",
@@ -100,13 +93,14 @@ function TimelineAdmin({ procesoId, etapa, onUpdate }: { procesoId: string; etap
 }
 
 // ---------- MODALES ----------
+// Modal Nuevo Cliente (con UNSPC texto y botón seleccionar todos)
 function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCreated: (c: Cliente) => void }) {
   const [form, setForm] = useState({
     id: "", nombre: "", usuario: "", password_hash: "",
     descripcion_negocio: "", palabras_clave: "", palabras_excluidas: "",
     departamentos: [] as string[], presupuesto_minimo: "0",
     usar_ia: true, activo: true, email_destinatario: "", drive_url: "",
-    codigos_unspc: [] as string[]
+    codigos_unspc_str: ""
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState("")
@@ -114,13 +108,18 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
   function toggleDepto(d: string) {
     setForm(f => ({ ...f, departamentos: f.departamentos.includes(d) ? f.departamentos.filter(x => x !== d) : [...f.departamentos, d] }))
   }
-  function toggleUnspc(code: string) {
-    setForm(f => ({ ...f, codigos_unspc: f.codigos_unspc.includes(code) ? f.codigos_unspc.filter(c => c !== code) : [...f.codigos_unspc, code] }))
+  function toggleTodosDeptos() {
+    setForm(f => ({
+      ...f,
+      departamentos: f.departamentos.length === DEPARTAMENTOS_CO.length ? [] : [...DEPARTAMENTOS_CO]
+    }))
   }
 
   async function guardar() {
     if (!form.id.trim() || !form.nombre.trim()) { setErr("ID y Nombre son obligatorios."); return }
     setSaving(true); setErr("")
+    // Convertir string UNSPC a array
+    const codigosArray = form.codigos_unspc_str.split(",").map(c => c.trim()).filter(Boolean)
     const { data, error } = await supabase.from("clientes").insert([{
       id: form.id.trim().toLowerCase().replace(/\s+/g, "_"),
       nombre: form.nombre.trim(),
@@ -134,7 +133,7 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
       usar_ia: form.usar_ia, activo: form.activo,
       email_destinatario: form.email_destinatario.trim() || null,
       drive_url: form.drive_url.trim() || null,
-      codigos_unspc: form.codigos_unspc,
+      codigos_unspc: codigosArray,
       modalidades_permitidas: null,
     }]).select().single()
     setSaving(false)
@@ -159,11 +158,33 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
           <div><label className="text-[11px] text-[#525a68] block mb-1">EMAIL NOTIFICACIONES</label><input type="email" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.email_destinatario} onChange={e => setForm(f=>({...f,email_destinatario:e.target.value}))} /></div>
           <div className="col-span-2"><label className="text-[11px] text-[#525a68] block mb-1">GOOGLE DRIVE URL</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.drive_url} onChange={e => setForm(f=>({...f,drive_url:e.target.value}))} /></div>
           
-          {/* Departamentos */}
-          <div className="col-span-2"><label className="text-[11px] text-[#525a68] block mb-1">DEPARTAMENTOS A MONITOREAR</label><div className="flex flex-wrap gap-2">{DEPARTAMENTOS_CO.map(d => <button key={d} type="button" onClick={()=>toggleDepto(d)} className={`text-xs px-2 py-1 rounded-full border ${form.departamentos.includes(d) ? "border-[#3b82f6] bg-[#1e3a8a22] text-[#60a5fa]" : "border-[#252932] text-[#525a68]"}`}>{d}</button>)}</div></div>
+          {/* Departamentos con botón seleccionar todos */}
+          <div className="col-span-2">
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] text-[#525a68]">DEPARTAMENTOS A MONITOREAR</label>
+              <button type="button" onClick={toggleTodosDeptos} className="text-[10px] text-[#3b82f6] hover:underline">
+                {form.departamentos.length === DEPARTAMENTOS_CO.length ? "Deseleccionar todos" : "Seleccionar todos"}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-[#252932] rounded bg-[#1c2028]">
+              {DEPARTAMENTOS_CO.map(d => (
+                <button key={d} type="button" onClick={() => toggleDepto(d)} className={`text-xs px-2 py-1 rounded-full border ${form.departamentos.includes(d) ? "border-[#3b82f6] bg-[#1e3a8a22] text-[#60a5fa]" : "border-[#252932] text-[#525a68]"}`}>{d}</button>
+              ))}
+            </div>
+          </div>
           
-          {/* Códigos UNSPC */}
-          <div className="col-span-2"><label className="text-[11px] text-[#525a68] block mb-1">CÓDIGOS UNSPC (filtro IA)</label><div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">{CODIGOS_UNSPC_DISPONIBLES.map(code => <button key={code} type="button" onClick={()=>toggleUnspc(code)} className={`text-xs px-2 py-1 rounded-full border ${form.codigos_unspc.includes(code) ? "border-[#22c55e] bg-[#22c55e22] text-[#22c55e]" : "border-[#252932] text-[#525a68]"}`}>{code}</button>)}</div><p className="text-[10px] text-[#525a68] mt-1">Selecciona los códigos relevantes para la actividad de la empresa.</p></div>
+          {/* Códigos UNSPC como texto */}
+          <div className="col-span-2">
+            <label className="text-[11px] text-[#525a68] block mb-1">CÓDIGOS UNSPC (separados por coma)</label>
+            <input
+              type="text"
+              className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm"
+              placeholder="Ej: 8016, 8111, 7210"
+              value={form.codigos_unspc_str}
+              onChange={e => setForm(f => ({ ...f, codigos_unspc_str: e.target.value }))}
+            />
+            <p className="text-[10px] text-[#525a68] mt-1">Códigos que la IA usará para filtrar procesos relevantes. Separa con comas.</p>
+          </div>
           
           <div className="flex gap-4"><label className="flex items-center gap-2"><input type="checkbox" checked={form.usar_ia} onChange={e=>setForm(f=>({...f,usar_ia:e.target.checked}))} /><span className="text-xs">Usar IA</span></label><label className="flex items-center gap-2"><input type="checkbox" checked={form.activo} onChange={e=>setForm(f=>({...f,activo:e.target.checked}))} /><span className="text-xs">Activo al crear</span></label></div>
         </div>
@@ -174,7 +195,7 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
   )
 }
 
-// Modal editar cliente (similar pero con campos UNSPC)
+// Modal Editar Cliente (con UNSPC texto y seleccionar todos)
 function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente; onClose: () => void; onUpdated: (c: Cliente) => void }) {
   const [form, setForm] = useState({
     nombre: cliente.nombre, usuario: cliente.usuario || "", password_hash: "",
@@ -184,14 +205,21 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
     departamentos: cliente.departamentos || [],
     presupuesto_minimo: String(cliente.presupuesto_minimo || 0),
     usar_ia: cliente.usar_ia, email_destinatario: cliente.email_destinatario || "",
-    drive_url: cliente.drive_url || "", codigos_unspc: cliente.codigos_unspc || []
+    drive_url: cliente.drive_url || "",
+    codigos_unspc_str: (cliente.codigos_unspc || []).join(", ")
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState("")
   function toggleDepto(d: string) { setForm(f => ({ ...f, departamentos: f.departamentos.includes(d) ? f.departamentos.filter(x=>x!==d) : [...f.departamentos, d] })) }
-  function toggleUnspc(code: string) { setForm(f => ({ ...f, codigos_unspc: f.codigos_unspc.includes(code) ? f.codigos_unspc.filter(c=>c!==code) : [...f.codigos_unspc, code] })) }
+  function toggleTodosDeptos() {
+    setForm(f => ({
+      ...f,
+      departamentos: f.departamentos.length === DEPARTAMENTOS_CO.length ? [] : [...DEPARTAMENTOS_CO]
+    }))
+  }
   async function guardar() {
     setSaving(true); setErr("")
+    const codigosArray = form.codigos_unspc_str.split(",").map(c => c.trim()).filter(Boolean)
     const update: Partial<Cliente> = {
       nombre: form.nombre.trim(), usuario: form.usuario.trim() || null,
       descripcion_negocio: form.descripcion_negocio.trim(),
@@ -199,7 +227,7 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
       palabras_excluidas: form.palabras_excluidas.split(",").map(x=>x.trim()).filter(Boolean),
       departamentos: form.departamentos, presupuesto_minimo: Number(form.presupuesto_minimo) || 0,
       usar_ia: form.usar_ia, email_destinatario: form.email_destinatario.trim() || null,
-      drive_url: form.drive_url.trim() || null, codigos_unspc: form.codigos_unspc,
+      drive_url: form.drive_url.trim() || null, codigos_unspc: codigosArray,
     }
     if (form.password_hash.trim()) update.password_hash = form.password_hash.trim()
     const { error } = await supabase.from("clientes").update(update).eq("id", cliente.id)
@@ -222,8 +250,25 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
           <div><label className="text-[11px] text-[#525a68]">PRESUPUESTO MÍNIMO</label><input type="number" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.presupuesto_minimo} onChange={e=>setForm(f=>({...f,presupuesto_minimo:e.target.value}))} /></div>
           <div><label className="text-[11px] text-[#525a68]">EMAIL NOTIFICACIONES</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.email_destinatario} onChange={e=>setForm(f=>({...f,email_destinatario:e.target.value}))} /></div>
           <div className="col-span-2"><label className="text-[11px] text-[#525a68]">GOOGLE DRIVE URL</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.drive_url} onChange={e=>setForm(f=>({...f,drive_url:e.target.value}))} /></div>
-          <div className="col-span-2"><label className="text-[11px] text-[#525a68]">DEPARTAMENTOS</label><div className="flex flex-wrap gap-2">{DEPARTAMENTOS_CO.map(d => <button key={d} type="button" onClick={()=>toggleDepto(d)} className={`text-xs px-2 py-1 rounded-full border ${form.departamentos.includes(d) ? "border-[#3b82f6] bg-[#1e3a8a22] text-[#60a5fa]" : "border-[#252932] text-[#525a68]"}`}>{d}</button>)}</div></div>
-          <div className="col-span-2"><label className="text-[11px] text-[#525a68]">CÓDIGOS UNSPC</label><div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">{CODIGOS_UNSPC_DISPONIBLES.map(code => <button key={code} type="button" onClick={()=>toggleUnspc(code)} className={`text-xs px-2 py-1 rounded-full border ${form.codigos_unspc.includes(code) ? "border-[#22c55e] bg-[#22c55e22] text-[#22c55e]" : "border-[#252932] text-[#525a68]"}`}>{code}</button>)}</div><p className="text-[10px] text-[#525a68] mt-1">Selecciona los códigos relevantes para la actividad de la empresa.</p></div>
+          
+          <div className="col-span-2">
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] text-[#525a68]">DEPARTAMENTOS</label>
+              <button type="button" onClick={toggleTodosDeptos} className="text-[10px] text-[#3b82f6] hover:underline">
+                {form.departamentos.length === DEPARTAMENTOS_CO.length ? "Deseleccionar todos" : "Seleccionar todos"}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-[#252932] rounded bg-[#1c2028]">
+              {DEPARTAMENTOS_CO.map(d => <button key={d} type="button" onClick={()=>toggleDepto(d)} className={`text-xs px-2 py-1 rounded-full border ${form.departamentos.includes(d) ? "border-[#3b82f6] bg-[#1e3a8a22] text-[#60a5fa]" : "border-[#252932] text-[#525a68]"}`}>{d}</button>)}
+            </div>
+          </div>
+          
+          <div className="col-span-2">
+            <label className="text-[11px] text-[#525a68] block mb-1">CÓDIGOS UNSPC (separados por coma)</label>
+            <input type="text" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" placeholder="Ej: 8016, 8111, 7210" value={form.codigos_unspc_str} onChange={e=>setForm(f=>({...f,codigos_unspc_str:e.target.value}))} />
+            <p className="text-[10px] text-[#525a68] mt-1">Códigos relevantes para la actividad de la empresa. Separa con comas.</p>
+          </div>
+          
           <div><label className="flex items-center gap-2"><input type="checkbox" checked={form.usar_ia} onChange={e=>setForm(f=>({...f,usar_ia:e.target.checked}))} /><span className="text-xs">Usar IA</span></label></div>
         </div>
         {err && <p className="text-red-500 text-xs mt-2">{err}</p>}
@@ -233,7 +278,7 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
   )
 }
 
-// Modal proceso manual (igual que original pero con UNSPC no necesario)
+// Modal Proceso Manual (sin cambios relevantes, se mantiene igual)
 function ModalProcesoManual({ clientes, onClose, onCreated }: { clientes: Cliente[]; onClose: () => void; onCreated: (p: Proceso) => void }) {
   const [form, setForm] = useState({
     cliente_id: clientes[0]?.id || "", referencia: "", entidad: "", departamento: "", ciudad: "",
@@ -559,7 +604,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB CLIENTES (similar al original pero con UNSPC visible) */}
+        {/* TAB CLIENTES */}
         {tab === "clientes" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {clientesFilt.map(c=>(
@@ -581,7 +626,7 @@ export default function AdminPage() {
         {/* TAB FEEDBACK */}
         {tab === "feedback" && (
           <div className="bg-[#15181f] border border-[#252932] rounded-xl overflow-auto">
-            <table className="w-full text-sm"><thead className="border-b border-[#252932]"><tr>{["Cliente","Proceso","Acción","Nota","Fecha"].map(h=><th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>)}</tr></thead><tbody>{feedback.slice(0,100).map(f=>{const proc=procesos.find(p=>p.id===f.proceso_id); return <tr key={f.id} className="border-b border-[#1c2028]"><td className="p-2 text-[11px] text-[#60a5fa]">{f.cliente_id||"—"}</td><td className="p-2 text-[10px] max-w-40 truncate">{proc?.entidad||f.proceso_id}</td><td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>{f.accion}</span></td><td className="p-2 text-[11px]">{f.nota||"—"}</td><td className="p-2 text-[10px] text-[#525a68]">{new Date(f.created_at).toLocaleDateString()}</td></tr>})}</tbody></table>
+            <table className="w-full text-sm"><thead className="border-b border-[#252932]"><tr>{["Cliente","Proceso","Acción","Nota","Fecha"].map(h=><th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>)}</thead><tbody>{feedback.slice(0,100).map(f=>{const proc=procesos.find(p=>p.id===f.proceso_id); return <tr key={f.id} className="border-b border-[#1c2028]"><td className="p-2 text-[11px] text-[#60a5fa]">{f.cliente_id||"—"}</td><td className="p-2 text-[10px] max-w-40 truncate">{proc?.entidad||f.proceso_id}<td><td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>{f.accion}</span></td><td className="p-2 text-[11px]">{f.nota||"—"}</td><td className="p-2 text-[10px] text-[#525a68]">{new Date(f.created_at).toLocaleDateString()}</td></tr>})}</tbody></table>
           </div>
         )}
       </div>
