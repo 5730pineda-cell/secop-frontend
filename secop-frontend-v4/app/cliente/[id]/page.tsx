@@ -265,8 +265,16 @@ export default function PortalCliente() {
 
   const filtrosActivos = [fDepto, fEntidad, fModalidad, fPresMin, fPresMax, fTexto, searchTerm].filter(Boolean).length
 
-  if (loading) return (/* spinner */)
-  if (error) return (/* error */)
+  if (loading) return (
+    <div className="min-h-screen bg-[#0B132B] flex items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00B0FF]"></div>
+    </div>
+  )
+  if (error) return (
+    <div className="min-h-screen bg-[#0B132B] flex items-center justify-center text-red-500">
+      {error}
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-[#0B132B] font-sans antialiased">
@@ -662,7 +670,9 @@ export default function PortalCliente() {
                 </div>
                 {interesados.length > 0 && (
                   <div className="flex items-start gap-3">
-                    <div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><StarIcon size={12} className="text-[#FFD600]" /></div>
+                    <div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0">
+                      <StarIcon size={12} className="text-[#FFD600]" />
+                    </div>
                     <div><p className="text-[12px] text-white">{interesados.length} proceso(s) marcados</p><p className="text-[11px] text-[#5A647A]">Como "Me interesa"</p><span className="text-[9px] text-[#2A3441] font-mono">reciente</span></div>
                   </div>
                 )}
@@ -738,11 +748,21 @@ export default function PortalCliente() {
   )
 }
 
-// Componente StarIcon para actividad reciente
-function StarIcon(props: React.SVGProps<SVGSVGElement>) {
+// Componente StarIcon corregido (acepta size)
+function StarIcon({ size = 16, ...props }: { size?: number } & React.SVGProps<SVGSVGElement>) {
   return (
-    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  )
+}
+
+// Componente DollarSign faltante (si no está importado, lo agregamos)
+function DollarSign(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <line x1="12" y1="1" x2="12" y2="23"></line>
+      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
     </svg>
   )
 }
