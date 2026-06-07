@@ -19,11 +19,9 @@ import {
 import {
   Bell,
   Search,
-  User,
   LogOut,
   ExternalLink,
   Send,
-  FolderOpen,
   Archive,
   Clock,
   TrendingUp,
@@ -33,14 +31,11 @@ import {
   AlertTriangle,
   FileText,
   CheckCircle,
-  MoreVertical,
-  Calendar,
   DollarSign,
   MapPin,
   Briefcase,
-  Activity,
-  Shield,
-  Users,
+  Star,
+  FolderOpen,
 } from "lucide-react"
 
 function fmt(n: number | null | undefined): string {
@@ -66,7 +61,7 @@ function diasRestantes(f: string | null): number | null {
 
 const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 
-// Datos mock para gráficos (se reemplazarán con datos reales después)
+// Datos mock para gráficos
 const trendData = [
   { name: "1 Mar", procesos: 4 },
   { name: "5 Mar", procesos: 7 },
@@ -239,7 +234,6 @@ export default function PortalCliente() {
   const presTotal = procesos.reduce((s, p) => s + Number(p.presupuesto || 0), 0)
   const presInteresados = interesados.reduce((s, p) => s + Number(p.presupuesto || 0), 0)
 
-  // Filtrar procesos por búsqueda
   const listaBase = tab === "nuevos" ? nuevos : tab === "interesado" ? interesados : []
   const listaActual = listaBase.filter(p => {
     if (!searchTerm) return true
@@ -264,7 +258,7 @@ export default function PortalCliente() {
 
   return (
     <div className="min-h-screen bg-[#0B132B] font-sans antialiased">
-      <style jsx global>{`
+      <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: #0B132B; }
         ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -662,14 +656,5 @@ export default function PortalCliente() {
 
       {showBienvenida && <BienvenidaToast nombre={cliente?.nombre || ""} onClose={() => setShowBienvenida(false)} />}
     </div>
-  )
-}
-
-// Componente Star para actividad reciente
-function Star(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-    </svg>
   )
 }
