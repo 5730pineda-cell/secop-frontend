@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import type { Cliente, Proceso, Feedback } from "@/types"
+import type { Cliente, Proceso } from "@/types"
 import {
   LineChart,
   Line,
@@ -17,7 +17,6 @@ import {
   Cell,
   AreaChart,
   Area,
-  CartesianGrid,
 } from "recharts"
 import {
   Bell,
@@ -309,8 +308,15 @@ export default function PortalCliente() {
   if (loading) return ( <div className="min-h-screen bg-[#0B132B] flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00B0FF]"></div></div> )
   if (error) return ( <div className="min-h-screen bg-[#0B132B] flex items-center justify-center text-red-500">{error}</div> )
 
-  // Tooltip style común
-  const tooltipStyle = { backgroundColor: '#1C2538', border: '1px solid #2A3441', borderRadius: '8px', color: '#FFFFFF', fontSize: '11px', padding: '6px 10px' }
+  // Tooltip style mejorado
+  const tooltipStyle = {
+    backgroundColor: '#1C2538',
+    border: '1px solid #2A3441',
+    borderRadius: '8px',
+    padding: '8px 12px',
+    fontSize: '11px',
+    color: '#FFFFFF',
+  }
 
   return (
     <div className="min-h-screen bg-[#0B132B] font-sans antialiased">
@@ -390,7 +396,7 @@ export default function PortalCliente() {
                     <BarChart data={procesosPorDepto} layout="vertical" margin={{ left: 40 }}>
                       <XAxis type="number" stroke="#5A647A" fontSize={10} />
                       <YAxis type="category" dataKey="depto" stroke="#5A647A" fontSize={9} width={80} tick={{ fill: '#A0A8B8' }} />
-                      <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`${value} procesos`, 'Cantidad']} />
+                      <Tooltip contentStyle={tooltipStyle} itemStyle={{ color: '#FFFFFF' }} labelStyle={{ color: '#FFFFFF' }} formatter={(value) => [`${value} procesos`, 'Cantidad']} />
                       <Bar dataKey="cantidad" fill="#00B0FF" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -398,14 +404,14 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* Dona de presupuesto (ya existente) */}
+            {/* Dona de presupuesto */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <div className="flex items-center gap-2 mb-4"><PieChartIcon size={16} className="text-[#00E676]" /><h2 className="text-[13px] font-bold text-white uppercase tracking-wider">Distribución presupuestaria</h2></div>
               <div className="h-[180px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie data={[{ name: "Interesados", value: presInteresados, color: "#00E676" }, { name: "En análisis", value: presTotal - presInteresados, color: "#FFB74D" }]} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value" stroke="none"><Cell fill="#00E676" /><Cell fill="#FFB74D" /></Pie>
-                    <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [fmt(value), 'Presupuesto']} />
+                    <Tooltip contentStyle={tooltipStyle} itemStyle={{ color: '#FFFFFF', fontSize: '11px' }} labelStyle={{ color: '#FFFFFF', fontWeight: 'bold' }} formatter={(value: number) => [fmt(value), 'Presupuesto']} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -416,7 +422,7 @@ export default function PortalCliente() {
             </div>
           </div>
 
-          {/* COLUMNA CENTRAL (6/12) - Procesos (igual que antes) */}
+          {/* COLUMNA CENTRAL (6/12) - Procesos (sin cambios en estructura) */}
           <div className="lg:col-span-6 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Zap size={18} className="text-[#00E676]" />{tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : "Descartados"}</h2>{tab !== "descartados" && (<button onClick={() => setFiltroPanel(!filtroPanel)} className={`flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-medium transition-all ${filtrosActivos > 0 ? "bg-[#00B0FF] text-white" : "bg-[#1C2538] text-[#A0A8B8] hover:bg-[#2A3441]"}`}><Filter size={12} /> Filtrar {filtrosActivos > 0 && `(${filtrosActivos})`}</button>)}</div>
@@ -471,23 +477,19 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA (3/12) - Intelligence Hub extendido */}
+          {/* COLUMNA DERECHA (3/12) */}
           <div className="lg:col-span-3 space-y-6">
-            {/* Top Oportunidades (enlace a SECOP) */}
+            {/* Top Oportunidades */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={14} className="text-[#00E676]" />Top Oportunidades</h2>
               <div className="space-y-3">{[...procesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta); return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-[#1C2538] transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-[#00E676]">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-[#FF5252]":"text-[#5A647A]"}`}>⏳ {dias}d</span>}</div></div><ExternalLink size={14} className="text-[#5A647A] group-hover:text-[#00B0FF] transition-colors" /></a>)})}</div>
             </div>
 
-            {/* Top Entidades por presupuesto (nuevo gráfico) */}
+            {/* Top Entidades por presupuesto */}
             {topEntidades.length > 0 && (
               <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
                 <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2"><BarChartIcon size={14} className="text-[#00E676]" />Top Entidades por Presupuesto</h2>
-                <div className="space-y-2">
-                  {topEntidades.map((ent, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-[11px]"><span className="text-[#A0A8B8] truncate max-w-[120px]">{ent.nombre}</span><span className="text-[#00E676] font-mono">{fmt(ent.presupuesto)}</span></div>
-                  ))}
-                </div>
+                <div className="space-y-2">{topEntidades.map((ent, idx) => (<div key={idx} className="flex items-center justify-between text-[11px]"><span className="text-[#A0A8B8] truncate max-w-[120px]">{ent.nombre}</span><span className="text-[#00E676] font-mono">{fmt(ent.presupuesto)}</span></div>))}</div>
               </div>
             )}
 
@@ -497,15 +499,11 @@ export default function PortalCliente() {
               <div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-[#1C2538]"><div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-[#00B0FF]" /></div><div><p className="text-[12px] text-white">Portal actualizado</p><p className="text-[11px] text-[#5A647A]">Nuevos procesos cargados</p><span className="text-[9px] text-[#2A3441] font-mono">hoy</span></div></div><div className="flex items-start gap-3 pb-3 border-b border-[#1C2538]"><div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><Send size={12} className="text-[#00E676]" /></div><div><p className="text-[12px] text-white">Análisis IA completado</p><p className="text-[11px] text-[#5A647A]">{procesos.length} procesos evaluados</p><span className="text-[9px] text-[#2A3441] font-mono">hace 1h</span></div></div>{interesados.length > 0 && (<div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><StarIcon size={12} className="text-[#FFD600]" /></div><div><p className="text-[12px] text-white">{interesados.length} proceso(s) marcados</p><p className="text-[11px] text-[#5A647A]">Como "Me interesa"</p><span className="text-[9px] text-[#2A3441] font-mono">reciente</span></div></div>)}</div>
             </div>
 
-            {/* Etapas de los interesados (nuevo gráfico) */}
+            {/* Etapas de los interesados */}
             {etapasInteresados.length > 0 && (
               <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
                 <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3">Etapas de Interés</h2>
-                <div className="space-y-2">
-                  {etapasInteresados.map(e => (
-                    <div key={e.nombre} className="flex items-center justify-between text-[11px]"><span className="text-[#A0A8B8]">{e.nombre}</span><span className="text-[#00B0FF] font-mono">{e.cantidad} proceso{e.cantidad !== 1 ? 's' : ''}</span></div>
-                  ))}
-                </div>
+                <div className="space-y-2">{etapasInteresados.map(e => (<div key={e.nombre} className="flex items-center justify-between text-[11px]"><span className="text-[#A0A8B8]">{e.nombre}</span><span className="text-[#00B0FF] font-mono">{e.cantidad} proceso{e.cantidad !== 1 ? 's' : ''}</span></div>))}</div>
               </div>
             )}
 
