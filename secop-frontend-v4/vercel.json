@@ -4,6 +4,6 @@
   "outputDirectory": ".next",
   "installCommand": "npm install",
   "env": {
-    "NEXT_PUBLIC_API_URL": "https://TU_BACKEND.railway.app"
+    "NEXT_PUBLIC_API_URL": "https://secop-backend-production-abc1.up.railway.app"
   }
 }
