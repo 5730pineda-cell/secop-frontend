@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Admin / Dashboard dark theme ─── */
+:root {
+  --bg-base:       #0a0c10;
+  --bg-surface:    #111318;
+  --bg-card:       #15181f;
+  --bg-elevated:   #1c2028;
+  --border:        #252932;
+  --border-bright: #2e3542;
+
+  --text-primary:  #eef0f4;
+  --text-secondary:#8b919e;
+  --text-muted:    #525a68;
+
+  --accent:        #3b82f6;
+  --accent-bright: #60a5fa;
+  --accent-dim:    #1d4ed8;
+  --green:         #22c55e;
+  --green-dim:     #15803d;
+  --amber:         #f59e0b;
+  --red:           #ef4444;
+  --red-dim:       #7f1d1d;
+
+  --font-display:  'Syne', sans-serif;
+  --font-mono:     'DM Mono', monospace;
+  --font-body:     'Inter', sans-serif;
+  --font-sans:     'DM Sans', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+::selection { background: var(--accent-dim); color: white; }
+
+.surface {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.mono { font-family: var(--font-mono); }
+
+@keyframes pulse-border {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+  50% { box-shadow: 0 0 0 3px rgba(59,130,246,0.12); }
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(16px) } to { opacity:1; transform:translateY(0) } }
+@keyframes floatOrb { 0%,100% { transform:translateY(0) scale(1) } 50% { transform:translateY(-16px) scale(1.04) } }
+@keyframes spin { to { transform:rotate(360deg) } }
+@keyframes slideOut { from { opacity:1; transform:translateY(0) scale(1) } to { opacity:0; transform:translateY(-6px) scale(0.98) } }
+@keyframes toastIn { from { opacity:0; transform:translate(-50%,12px) } to { opacity:1; transform:translate(-50%,0) } }
+@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.35 } }
+@keyframes progress { from { width:0% } to { width:100% } }
