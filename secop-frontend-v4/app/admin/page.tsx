@@ -98,7 +98,8 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
     descripcion_negocio: "", palabras_clave: "", palabras_excluidas: "",
     departamentos: [] as string[], presupuesto_minimo: "0",
     usar_ia: true, activo: true, email_destinatario: "", drive_url: "",
-    codigos_unspc_str: ""
+    codigos_unspc_str: "",
+    restringir_minima: false   // nuevo flag
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState("")
@@ -107,15 +108,14 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
     setForm(f => ({ ...f, departamentos: f.departamentos.includes(d) ? f.departamentos.filter(x => x !== d) : [...f.departamentos, d] }))
   }
   function toggleTodosDeptos() {
-    setForm(f => ({
-      ...f,
-      departamentos: f.departamentos.length === DEPARTAMENTOS_CO.length ? [] : [...DEPARTAMENTOS_CO]
-    }))
+    setForm(f => ({ ...f, departamentos: f.departamentos.length === DEPARTAMENTOS_CO.length ? [] : [...DEPARTAMENTOS_CO] }))
   }
+
   async function guardar() {
     if (!form.id.trim() || !form.nombre.trim()) { setErr("ID y Nombre son obligatorios."); return }
     setSaving(true); setErr("")
     const codigosArray = form.codigos_unspc_str.split(",").map(c => c.trim()).filter(Boolean)
+    const modalidadesArray = form.restringir_minima ? ["Mínima Cuantía"] : null
     const { data, error } = await supabase.from("clientes").insert([{
       id: form.id.trim().toLowerCase().replace(/\s+/g, "_"),
       nombre: form.nombre.trim(),
@@ -130,7 +130,7 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
       email_destinatario: form.email_destinatario.trim() || null,
       drive_url: form.drive_url.trim() || null,
       codigos_unspc: codigosArray,
-      modalidades_permitidas: null,
+      modalidades_permitidas: modalidadesArray,
     }]).select().single()
     setSaving(false)
     if (error) { setErr(error.message); return }
@@ -171,6 +171,18 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
             <input type="text" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" placeholder="Ej: 8016, 8111, 7210" value={form.codigos_unspc_str} onChange={e => setForm(f => ({ ...f, codigos_unspc_str: e.target.value }))} />
             <p className="text-[10px] text-[#525a68] mt-1">Códigos que la IA usará para filtrar procesos relevantes. Separa con comas.</p>
           </div>
+          <div className="col-span-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.restringir_minima}
+                onChange={e => setForm(f => ({ ...f, restringir_minima: e.target.checked }))}
+                className="w-4 h-4 accent-[#3b82f6]"
+              />
+              <span className="text-[11px] text-[#525a68]">Restringir solo a procesos de Mínima Cuantía (para empresas pequeñas sin RUP)</span>
+            </label>
+            <p className="text-[10px] text-[#525a68] mt-1">Si activas esta opción, el cliente solo verá procesos con modalidad "Mínima Cuantía".</p>
+          </div>
           <div className="flex gap-4"><label className="flex items-center gap-2"><input type="checkbox" checked={form.usar_ia} onChange={e=>setForm(f=>({...f,usar_ia:e.target.checked}))} /><span className="text-xs">Usar IA</span></label><label className="flex items-center gap-2"><input type="checkbox" checked={form.activo} onChange={e=>setForm(f=>({...f,activo:e.target.checked}))} /><span className="text-xs">Activo al crear</span></label></div>
         </div>
         {err && <p className="text-red-500 text-xs mt-2">{err}</p>}
@@ -191,7 +203,8 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
     presupuesto_minimo: String(cliente.presupuesto_minimo || 0),
     usar_ia: cliente.usar_ia, email_destinatario: cliente.email_destinatario || "",
     drive_url: cliente.drive_url || "",
-    codigos_unspc_str: (cliente.codigos_unspc || []).join(", ")
+    codigos_unspc_str: (cliente.codigos_unspc || []).join(", "),
+    restringir_minima: (cliente.modalidades_permitidas || []).includes("Mínima Cuantía")
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState("")
@@ -202,6 +215,7 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
   async function guardar() {
     setSaving(true); setErr("")
     const codigosArray = form.codigos_unspc_str.split(",").map(c => c.trim()).filter(Boolean)
+    const modalidadesArray = form.restringir_minima ? ["Mínima Cuantía"] : null
     const update: Partial<Cliente> = {
       nombre: form.nombre.trim(), usuario: form.usuario.trim() || null,
       descripcion_negocio: form.descripcion_negocio.trim(),
@@ -210,6 +224,7 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
       departamentos: form.departamentos, presupuesto_minimo: Number(form.presupuesto_minimo) || 0,
       usar_ia: form.usar_ia, email_destinatario: form.email_destinatario.trim() || null,
       drive_url: form.drive_url.trim() || null, codigos_unspc: codigosArray,
+      modalidades_permitidas: modalidadesArray,
     }
     if (form.password_hash.trim()) update.password_hash = form.password_hash.trim()
     const { error } = await supabase.from("clientes").update(update).eq("id", cliente.id)
@@ -248,6 +263,17 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
             <input type="text" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" placeholder="Ej: 8016, 8111, 7210" value={form.codigos_unspc_str} onChange={e=>setForm(f=>({...f,codigos_unspc_str:e.target.value}))} />
             <p className="text-[10px] text-[#525a68] mt-1">Códigos relevantes para la actividad de la empresa. Separa con comas.</p>
           </div>
+          <div className="col-span-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.restringir_minima}
+                onChange={e => setForm(f => ({ ...f, restringir_minima: e.target.checked }))}
+                className="w-4 h-4 accent-[#3b82f6]"
+              />
+              <span className="text-[11px] text-[#525a68]">Restringir solo a procesos de Mínima Cuantía</span>
+            </label>
+          </div>
           <div><label className="flex items-center gap-2"><input type="checkbox" checked={form.usar_ia} onChange={e=>setForm(f=>({...f,usar_ia:e.target.checked}))} /><span className="text-xs">Usar IA</span></label></div>
         </div>
         {err && <p className="text-red-500 text-xs mt-2">{err}</p>}
@@ -257,7 +283,7 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
   )
 }
 
-// ---------- MODAL PROCESO MANUAL ----------
+// ---------- MODAL PROCESO MANUAL (sin cambios relevantes) ----------
 function ModalProcesoManual({ clientes, onClose, onCreated }: { clientes: Cliente[]; onClose: () => void; onCreated: (p: Proceso) => void }) {
   const [form, setForm] = useState({
     cliente_id: clientes[0]?.id || "", referencia: "", entidad: "", departamento: "", ciudad: "",
@@ -475,7 +501,6 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-[#0a0c10] text-white font-sans">
-      {/* NAV */}
       <nav className="sticky top-0 z-50 bg-[#111318] border-b border-[#252932] h-14 flex items-center px-6">
         <div className="max-w-[1400px] w-full mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4"><span className="font-display text-xl font-black"><span className="text-white">sof</span><span className="text-[#3b82f6]">ia</span></span><span className="text-[10px] text-[#525a68] uppercase">Admin · OC Consultores</span></div>
@@ -515,7 +540,7 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Filtros y tabs */}
+        {/* Filtros */}
         <div className="flex flex-wrap gap-3 items-center justify-between mb-4">
           <div className="flex gap-2">
             <select value={clienteSel || ""} onChange={e=>setClienteSel(e.target.value||null)} className="bg-[#15181f] border border-[#252932] rounded-lg p-2 text-sm"><option value="">Todos los clientes</option>{clientes.map(c=><option key={c.id} value={c.id}>{c.nombre} {!c.activo?"(inactivo)":""}</option>)}</select>
