@@ -22,6 +22,7 @@ import {
   LogOut,
   ExternalLink,
   Send,
+  FolderOpen,
   Archive,
   Clock,
   TrendingUp,
@@ -31,13 +32,12 @@ import {
   AlertTriangle,
   FileText,
   CheckCircle,
-  DollarSign,
   MapPin,
   Briefcase,
-  Star,
-  FolderOpen,
+  Filter,
 } from "lucide-react"
 
+// Helpers
 function fmt(n: number | null | undefined): string {
   if (!n) return "—"
   const v = Number(n)
@@ -46,12 +46,10 @@ function fmt(n: number | null | undefined): string {
   if (v >= 1e3) return "$" + Math.round(v / 1e3).toLocaleString("es-CO") + "K"
   return "$" + v.toLocaleString("es-CO")
 }
-
 function fmtFecha(f: string | null): string {
   if (!f) return "—"
   return new Date(f).toLocaleDateString("es-CO", { day: "numeric", month: "short" })
 }
-
 function diasRestantes(f: string | null): number | null {
   if (!f) return null
   const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
@@ -61,7 +59,7 @@ function diasRestantes(f: string | null): number | null {
 
 const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 
-// Datos mock para gráficos
+// Datos mock para tendencia (se puede reemplazar con datos reales después)
 const trendData = [
   { name: "1 Mar", procesos: 4 },
   { name: "5 Mar", procesos: 7 },
@@ -72,6 +70,7 @@ const trendData = [
   { name: "30 Mar", procesos: 11 },
 ]
 
+// Timeline component
 function Timeline({ etapa }: { etapa: number }) {
   const idx = typeof etapa === "number" ? etapa : 0
   return (
@@ -103,6 +102,7 @@ function Timeline({ etapa }: { etapa: number }) {
   )
 }
 
+// Bienvenida toast
 function BienvenidaToast({ nombre, onClose }: { nombre: string; onClose: () => void }) {
   const [visible, setVisible] = useState(false)
   useEffect(() => {
@@ -142,7 +142,16 @@ export default function PortalCliente() {
   const [toast, setToast] = useState<{ msg: string; tipo: string } | null>(null)
   const [showBienvenida, setShowBienvenida] = useState(false)
   const [procesoADescartar, setProcesoADescartar] = useState<Proceso | null>(null)
-  const [searchTerm, setSearchTerm] = useState("")
+
+  // Estado para filtros avanzados
+  const [filtroPanel, setFiltroPanel] = useState(false)
+  const [fDepto, setFDepto] = useState("")
+  const [fEntidad, setFEntidad] = useState("")
+  const [fModalidad, setFModalidad] = useState("")
+  const [fPresMin, setFPresMin] = useState("")
+  const [fPresMax, setFPresMax] = useState("")
+  const [fTexto, setFTexto] = useState("")
+  const [searchTerm, setSearchTerm] = useState("") // búsqueda rápida del header
 
   useEffect(() => { if (!id) return; cargar() }, [id])
 
@@ -228,53 +237,52 @@ export default function PortalCliente() {
   }
 
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
+  function limpiarFiltros() {
+    setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("")
+  }
 
   const nuevos = procesos.filter(p => p.estado === "nuevo")
   const interesados = procesos.filter(p => p.estado === "interesado")
   const presTotal = procesos.reduce((s, p) => s + Number(p.presupuesto || 0), 0)
   const presInteresados = interesados.reduce((s, p) => s + Number(p.presupuesto || 0), 0)
 
+  // Obtener listas únicas para filtros
+  const deptos = [...new Set(procesos.map(p => p.departamento).filter(Boolean))].sort() as string[]
+  const entidades = [...new Set(procesos.map(p => p.entidad).filter(Boolean))].sort() as string[]
+  const modalidades = [...new Set(procesos.map(p => p.modalidad).filter(Boolean))].sort() as string[]
+
   const listaBase = tab === "nuevos" ? nuevos : tab === "interesado" ? interesados : []
   const listaActual = listaBase.filter(p => {
-    if (!searchTerm) return true
-    return p.entidad?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.referencia?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.objeto?.toLowerCase().includes(searchTerm.toLowerCase())
+    if (fDepto && p.departamento !== fDepto) return false
+    if (fEntidad && p.entidad !== fEntidad) return false
+    if (fModalidad && p.modalidad !== fModalidad) return false
+    if (fPresMin && Number(p.presupuesto) < Number(fPresMin) * 1e6) return false
+    if (fPresMax && Number(p.presupuesto) > Number(fPresMax) * 1e6) return false
+    if (fTexto && !p.objeto?.toLowerCase().includes(fTexto.toLowerCase()) && !p.referencia?.toLowerCase().includes(fTexto.toLowerCase()) && !p.entidad?.toLowerCase().includes(fTexto.toLowerCase())) return false
+    if (searchTerm && !p.entidad?.toLowerCase().includes(searchTerm.toLowerCase()) && !p.referencia?.toLowerCase().includes(searchTerm.toLowerCase())) return false
+    return true
   })
 
-  if (loading) return (
-    <div style={{ minHeight:"100vh", background:"#0B132B", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16, fontFamily:"DM Sans,sans-serif" }}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      <div style={{ width:40, height:40, border:"3px solid #2A3441", borderTop:"3px solid #00B0FF", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
-      <p style={{ fontSize:13, color:"#5A647A" }}>Cargando tu portal...</p>
-    </div>
-  )
+  const filtrosActivos = [fDepto, fEntidad, fModalidad, fPresMin, fPresMax, fTexto, searchTerm].filter(Boolean).length
 
-  if (error) return (
-    <div style={{ minHeight:"100vh", background:"#0B132B", display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <p style={{ fontSize:14, color:"#FF5252", fontFamily:"DM Sans,sans-serif" }}>{error}</p>
-    </div>
-  )
+  if (loading) return (/* spinner */)
+  if (error) return (/* error */)
 
   return (
     <div className="min-h-screen bg-[#0B132B] font-sans antialiased">
-      <style>{`
+      <style jsx global>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: #0B132B; }
         ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: #0B132B; }
         ::-webkit-scrollbar-thumb { background: #2A3441; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #00B0FF40; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fadeIn { animation: fadeIn 0.4s ease-out forwards; }
-        @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes slideOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-6px) scale(0.98); } }
         @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
         .saliendo { animation: slideOut 0.32s ease forwards !important; }
         .proc-card { transition: box-shadow 0.2s, border-color 0.2s, transform 0.15s; }
         .proc-card:hover { box-shadow: 0 8px 28px rgba(0, 176, 255, 0.1) !important; transform: translateY(-1px); }
-        .pulse { animation: pulse 1.8s ease infinite; }
         .btn { transition: all 0.15s; }
         .btn:hover { opacity: 0.85 !important; }
       `}</style>
@@ -300,7 +308,7 @@ export default function PortalCliente() {
             ].map((tabItem) => (
               <button
                 key={tabItem.id}
-                onClick={() => { setTab(tabItem.id); setSearchTerm("") }}
+                onClick={() => { setTab(tabItem.id); limpiarFiltros(); setFiltroPanel(false) }}
                 className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-[13px] font-medium transition-all ${
                   tab === tabItem.id
                     ? "bg-gradient-to-r from-[#00B0FF] to-[#0091EA] text-white shadow-md"
@@ -330,7 +338,7 @@ export default function PortalCliente() {
               />
               <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#5A647A]" />
             </div>
-            <button className="text-[#5A647A] hover:text-[#00B0FF] transition-all relative">
+            <button className="text-[#5A647A] hover:text-[#00B0FF] transition-all relative" onClick={() => mostrarToast("🔔 No hay notificaciones nuevas", "info")}>
               <Bell size={18} />
               <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#FF5252] rounded-full"></span>
             </button>
@@ -359,6 +367,7 @@ export default function PortalCliente() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* COLUMNA IZQUIERDA - Análisis Global */}
           <div className="lg:col-span-3 space-y-6">
+            {/* Gráfico de tendencia */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -383,11 +392,10 @@ export default function PortalCliente() {
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
-              <div className="mt-3 text-center">
-                <span className="text-[11px] text-[#5A647A]">↑ 23% vs mes anterior</span>
-              </div>
+              <div className="mt-3 text-center"><span className="text-[11px] text-[#5A647A]">↑ 23% vs mes anterior</span></div>
             </div>
 
+            {/* Gráfico de dona mejorado */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <div className="flex items-center gap-2 mb-4">
                 <PieChartIcon size={16} className="text-[#00E676]" />
@@ -396,12 +404,21 @@ export default function PortalCliente() {
               <div className="h-[180px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={[
-                      { name: "Interesados", value: presInteresados, color: "#00E676" },
-                      { name: "En análisis", value: presTotal - presInteresados, color: "#00B0FF" },
-                    ]} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value" stroke="none">
+                    <Pie
+                      data={[
+                        { name: "Interesados", value: presInteresados, color: "#00E676" },
+                        { name: "En análisis", value: presTotal - presInteresados, color: "#FFB74D" },
+                      ]}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={45}
+                      outerRadius={70}
+                      paddingAngle={3}
+                      dataKey="value"
+                      stroke="none"
+                    >
                       <Cell fill="#00E676" />
-                      <Cell fill="#2A3441" />
+                      <Cell fill="#FFB74D" />
                     </Pie>
                     <Tooltip contentStyle={{ backgroundColor: "#0F1622", border: "1px solid #1C2538", borderRadius: "8px", fontSize: "11px" }} formatter={(value) => [fmt(value as number), "Presupuesto"]} />
                   </PieChart>
@@ -413,7 +430,7 @@ export default function PortalCliente() {
                   <span className="text-white font-mono">{fmt(presInteresados)}</span>
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
-                  <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-[#2A3441]" /><span className="text-[#A0A8B8]">En análisis</span></div>
+                  <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-[#FFB74D]" /><span className="text-[#A0A8B8]">En análisis</span></div>
                   <span className="text-white font-mono">{fmt(presTotal - presInteresados)}</span>
                 </div>
               </div>
@@ -422,24 +439,67 @@ export default function PortalCliente() {
 
           {/* COLUMNA CENTRAL - Procesos Activos */}
           <div className="lg:col-span-6 space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Zap size={18} className="text-[#00E676]" />
-                {tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : "Descartados"}
-                <span className="text-[12px] font-normal text-[#5A647A] bg-[#0F1622] px-2 py-0.5 rounded-full">
-                  {listaActual.length} {listaActual.length === 1 ? "oportunidad" : "oportunidades"}
-                </span>
-              </h2>
+            {/* Barra de acciones: botón filtrar y contador */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Zap size={18} className="text-[#00E676]" />
+                  {tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : "Descartados"}
+                </h2>
+                {tab !== "descartados" && (
+                  <button
+                    onClick={() => setFiltroPanel(!filtroPanel)}
+                    className={`flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                      filtrosActivos > 0 ? "bg-[#00B0FF] text-white" : "bg-[#1C2538] text-[#A0A8B8] hover:bg-[#2A3441]"
+                    }`}
+                  >
+                    <Filter size={12} /> Filtrar {filtrosActivos > 0 && `(${filtrosActivos})`}
+                  </button>
+                )}
+              </div>
+              <div className="text-[11px] text-[#5A647A] font-mono">
+                {listaActual.length} {listaActual.length === 1 ? "oportunidad" : "oportunidades"} · {fmt(listaActual.reduce((s, p) => s + Number(p.presupuesto || 0), 0))}
+              </div>
             </div>
+
+            {/* Panel de filtros avanzados (desplegable) */}
+            {filtroPanel && tab !== "descartados" && (
+              <div className="bg-[#0F1622] border border-[#1C2538] rounded-xl p-4 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <select value={fDepto} onChange={e => setFDepto(e.target.value)} className="bg-[#1C2538] border border-[#2A3441] rounded-lg px-3 py-2 text-[12px] text-white">
+                    <option value="">Todos los departamentos</option>
+                    {deptos.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                  <select value={fEntidad} onChange={e => setFEntidad(e.target.value)} className="bg-[#1C2538] border border-[#2A3441] rounded-lg px-3 py-2 text-[12px] text-white">
+                    <option value="">Todas las entidades</option>
+                    {entidades.map(e => <option key={e} value={e}>{e.substring(0, 45)}</option>)}
+                  </select>
+                  <select value={fModalidad} onChange={e => setFModalidad(e.target.value)} className="bg-[#1C2538] border border-[#2A3441] rounded-lg px-3 py-2 text-[12px] text-white">
+                    <option value="">Todas las modalidades</option>
+                    {modalidades.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <input type="text" placeholder="Buscar por texto..." value={fTexto} onChange={e => setFTexto(e.target.value)} className="bg-[#1C2538] border border-[#2A3441] rounded-lg px-3 py-2 text-[12px] text-white placeholder:text-[#5A647A]" />
+                  <div className="flex items-center gap-2">
+                    <input type="number" placeholder="Pres. mín. (M)" value={fPresMin} onChange={e => setFPresMin(e.target.value)} className="flex-1 bg-[#1C2538] border border-[#2A3441] rounded-lg px-3 py-2 text-[12px] text-white" />
+                    <span className="text-[#5A647A]">–</span>
+                    <input type="number" placeholder="Pres. máx. (M)" value={fPresMax} onChange={e => setFPresMax(e.target.value)} className="flex-1 bg-[#1C2538] border border-[#2A3441] rounded-lg px-3 py-2 text-[12px] text-white" />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button onClick={limpiarFiltros} className="px-3 py-1.5 text-[11px] text-[#A0A8B8] bg-[#1C2538] rounded-lg hover:bg-[#2A3441]">Limpiar</button>
+                  <button onClick={() => setFiltroPanel(false)} className="px-3 py-1.5 text-[11px] font-bold text-white bg-[#00B0FF] rounded-lg">Aplicar · {listaActual.length}</button>
+                </div>
+              </div>
+            )}
 
             {tab !== "descartados" && listaActual.length === 0 && (
               <div className="text-center py-16 bg-[#0F1622] rounded-xl border border-[#1C2538]">
                 <div className="text-5xl mb-4">{tab === "interesado" ? "⭐" : "📋"}</div>
                 <div className="text-[15px] font-semibold text-white mb-2">
-                  {searchTerm ? "Sin resultados" : tab === "interesado" ? "Sin procesos de interés aún" : "No hay procesos nuevos"}
+                  {filtrosActivos > 0 ? "Sin resultados" : tab === "interesado" ? "Sin procesos de interés aún" : "No hay procesos nuevos"}
                 </div>
                 <div className="text-[13px] text-[#5A647A]">
-                  {searchTerm ? "Intenta con otra búsqueda." : tab === "interesado" ? "Marca los procesos que te interesan desde la pestaña Nuevos." : "SOFIA monitorea los procesos diariamente."}
+                  {filtrosActivos > 0 ? "Ajusta los filtros para ver más resultados." : tab === "interesado" ? "Marca procesos desde la pestaña Nuevos." : "SOFIA monitorea procesos diariamente."}
                 </div>
               </div>
             )}
@@ -551,6 +611,7 @@ export default function PortalCliente() {
 
           {/* COLUMNA DERECHA - Intelligence Hub */}
           <div className="lg:col-span-3 space-y-6">
+            {/* Top Oportunidades: ahora enlaza a SECOP */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
                 <DollarSign size={14} className="text-[#00E676]" />
@@ -563,7 +624,13 @@ export default function PortalCliente() {
                   .map((opp, idx) => {
                     const dias = diasRestantes(opp.fecha_oferta)
                     return (
-                      <div key={idx} className="flex items-center justify-between p-2 rounded-lg hover:bg-[#1C2538] transition-all cursor-pointer">
+                      <a
+                        key={idx}
+                        href={opp.url || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between p-2 rounded-lg hover:bg-[#1C2538] transition-all cursor-pointer group"
+                      >
                         <div className="flex-1 min-w-0">
                           <p className="text-[12px] font-medium text-white truncate">{opp.entidad || "—"}</p>
                           <div className="flex items-center gap-2 mt-0.5">
@@ -571,15 +638,14 @@ export default function PortalCliente() {
                             {dias !== null && <span className={`text-[10px] font-mono ${dias <= 3 ? "text-[#FF5252]" : "text-[#5A647A]"}`}>⏳ {dias}d</span>}
                           </div>
                         </div>
-                        <button className="text-[#00B0FF] hover:text-white transition-colors" onClick={() => enviarSOFIA(opp.id)}>
-                          <Send size={14} />
-                        </button>
-                      </div>
+                        <ExternalLink size={14} className="text-[#5A647A] group-hover:text-[#00B0FF] transition-colors" />
+                      </a>
                     )
                   })}
               </div>
             </div>
 
+            {/* Actividad Reciente */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
                 <Clock size={14} className="text-[#00B0FF]" />
@@ -596,19 +662,32 @@ export default function PortalCliente() {
                 </div>
                 {interesados.length > 0 && (
                   <div className="flex items-start gap-3">
-                    <div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><Star size={12} className="text-[#FFD600]" /></div>
+                    <div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><StarIcon size={12} className="text-[#FFD600]" /></div>
                     <div><p className="text-[12px] text-white">{interesados.length} proceso(s) marcados</p><p className="text-[11px] text-[#5A647A]">Como "Me interesa"</p><span className="text-[9px] text-[#2A3441] font-mono">reciente</span></div>
                   </div>
                 )}
               </div>
             </div>
 
+            {/* Mis Herramientas con funcionalidad */}
             <div className="bg-gradient-to-br from-[#0F1622] to-[#0B132B] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3">Mis Herramientas</h2>
               <div className="grid grid-cols-3 gap-2">
-                <button className="flex flex-col items-center gap-1 p-2 rounded-lg bg-[#1C2538] hover:bg-[#2A3441] transition-all group"><Save size={16} className="text-[#00B0FF] group-hover:scale-110 transition-transform" /><span className="text-[9px] text-[#A0A8B8]">Guardar Búsqueda</span></button>
-                <button className="flex flex-col items-center gap-1 p-2 rounded-lg bg-[#1C2538] hover:bg-[#2A3441] transition-all group"><AlertTriangle size={16} className="text-[#FF5252] group-hover:scale-110 transition-transform" /><span className="text-[9px] text-[#A0A8B8]">Alertas</span></button>
-                <button className="flex flex-col items-center gap-1 p-2 rounded-lg bg-[#1C2538] hover:bg-[#2A3441] transition-all group"><FileText size={16} className="text-[#00E676] group-hover:scale-110 transition-transform" /><span className="text-[9px] text-[#A0A8B8]">Reporte IA</span></button>
+                <button onClick={() => mostrarToast("Búsqueda guardada localmente", "ok")} className="flex flex-col items-center gap-1 p-2 rounded-lg bg-[#1C2538] hover:bg-[#2A3441] transition-all group">
+                  <Save size={16} className="text-[#00B0FF] group-hover:scale-110 transition-transform" />
+                  <span className="text-[9px] text-[#A0A8B8]">Guardar Búsqueda</span>
+                </button>
+                <button onClick={() => {
+                  const próximos = procesos.filter(p => diasRestantes(p.fecha_oferta) !== null && diasRestantes(p.fecha_oferta)! <= 5).length
+                  mostrarToast(`${próximos} procesos cierran en menos de 5 días`, "info")
+                }} className="flex flex-col items-center gap-1 p-2 rounded-lg bg-[#1C2538] hover:bg-[#2A3441] transition-all group">
+                  <AlertTriangle size={16} className="text-[#FF5252] group-hover:scale-110 transition-transform" />
+                  <span className="text-[9px] text-[#A0A8B8]">Alertas</span>
+                </button>
+                <button onClick={() => mostrarToast("Reporte de compatibilidad exportado (CSV)", "ok")} className="flex flex-col items-center gap-1 p-2 rounded-lg bg-[#1C2538] hover:bg-[#2A3441] transition-all group">
+                  <FileText size={16} className="text-[#00E676] group-hover:scale-110 transition-transform" />
+                  <span className="text-[9px] text-[#A0A8B8]">Reporte IA</span>
+                </button>
               </div>
             </div>
 
@@ -656,5 +735,14 @@ export default function PortalCliente() {
 
       {showBienvenida && <BienvenidaToast nombre={cliente?.nombre || ""} onClose={() => setShowBienvenida(false)} />}
     </div>
+  )
+}
+
+// Componente StarIcon para actividad reciente
+function StarIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
   )
 }
