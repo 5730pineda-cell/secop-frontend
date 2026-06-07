@@ -35,6 +35,7 @@ import {
   MapPin,
   Briefcase,
   Filter,
+  DollarSign, // ✅ Correcto: viene de lucide-react y acepta size
 } from "lucide-react"
 
 // Helpers
@@ -59,7 +60,7 @@ function diasRestantes(f: string | null): number | null {
 
 const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 
-// Datos mock para tendencia (se puede reemplazar con datos reales después)
+// Datos mock para tendencia
 const trendData = [
   { name: "1 Mar", procesos: 4 },
   { name: "5 Mar", procesos: 7 },
@@ -151,7 +152,7 @@ export default function PortalCliente() {
   const [fPresMin, setFPresMin] = useState("")
   const [fPresMax, setFPresMax] = useState("")
   const [fTexto, setFTexto] = useState("")
-  const [searchTerm, setSearchTerm] = useState("") // búsqueda rápida del header
+  const [searchTerm, setSearchTerm] = useState("")
 
   useEffect(() => { if (!id) return; cargar() }, [id])
 
@@ -246,7 +247,6 @@ export default function PortalCliente() {
   const presTotal = procesos.reduce((s, p) => s + Number(p.presupuesto || 0), 0)
   const presInteresados = interesados.reduce((s, p) => s + Number(p.presupuesto || 0), 0)
 
-  // Obtener listas únicas para filtros
   const deptos = [...new Set(procesos.map(p => p.departamento).filter(Boolean))].sort() as string[]
   const entidades = [...new Set(procesos.map(p => p.entidad).filter(Boolean))].sort() as string[]
   const modalidades = [...new Set(procesos.map(p => p.modalidad).filter(Boolean))].sort() as string[]
@@ -375,7 +375,6 @@ export default function PortalCliente() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* COLUMNA IZQUIERDA - Análisis Global */}
           <div className="lg:col-span-3 space-y-6">
-            {/* Gráfico de tendencia */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -403,7 +402,6 @@ export default function PortalCliente() {
               <div className="mt-3 text-center"><span className="text-[11px] text-[#5A647A]">↑ 23% vs mes anterior</span></div>
             </div>
 
-            {/* Gráfico de dona mejorado */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <div className="flex items-center gap-2 mb-4">
                 <PieChartIcon size={16} className="text-[#00E676]" />
@@ -447,7 +445,6 @@ export default function PortalCliente() {
 
           {/* COLUMNA CENTRAL - Procesos Activos */}
           <div className="lg:col-span-6 space-y-4">
-            {/* Barra de acciones: botón filtrar y contador */}
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -470,7 +467,6 @@ export default function PortalCliente() {
               </div>
             </div>
 
-            {/* Panel de filtros avanzados (desplegable) */}
             {filtroPanel && tab !== "descartados" && (
               <div className="bg-[#0F1622] border border-[#1C2538] rounded-xl p-4 space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -619,7 +615,6 @@ export default function PortalCliente() {
 
           {/* COLUMNA DERECHA - Intelligence Hub */}
           <div className="lg:col-span-3 space-y-6">
-            {/* Top Oportunidades: ahora enlaza a SECOP */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
                 <DollarSign size={14} className="text-[#00E676]" />
@@ -653,7 +648,6 @@ export default function PortalCliente() {
               </div>
             </div>
 
-            {/* Actividad Reciente */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
                 <Clock size={14} className="text-[#00B0FF]" />
@@ -679,7 +673,6 @@ export default function PortalCliente() {
               </div>
             </div>
 
-            {/* Mis Herramientas con funcionalidad */}
             <div className="bg-gradient-to-br from-[#0F1622] to-[#0B132B] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3">Mis Herramientas</h2>
               <div className="grid grid-cols-3 gap-2">
@@ -753,16 +746,6 @@ function StarIcon({ size = 16, ...props }: { size?: number } & React.SVGProps<SV
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-    </svg>
-  )
-}
-
-// Componente DollarSign faltante (si no está importado, lo agregamos)
-function DollarSign(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <line x1="12" y1="1" x2="12" y2="23"></line>
-      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
     </svg>
   )
 }
