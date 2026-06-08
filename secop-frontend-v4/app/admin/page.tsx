@@ -375,12 +375,12 @@ export default function AdminPage() {
   const [mostrarNotis, setMostrarNotis] = useState(false)
 
   useEffect(() => {
-    if (sessionStorage.getItem("secop_admin") === "true") { setAuthed(true); cargar() }
+   if (sessionStorage.getItem("secop_admin") === btoa(ADMIN_PASS)) { setAuthed(true); cargar() }
     else setLoading(false)
   }, [])
 
   async function login() {
-    if (pass === ADMIN_PASS) { sessionStorage.setItem("secop_admin", "true"); setAuthed(true); cargar() }
+    if (pass === ADMIN_PASS) { sessionStorage.setItem("secop_admin", btoa(ADMIN_PASS)); setAuthed(true); cargar() }
     else setLoginErr(true)
   }
 
