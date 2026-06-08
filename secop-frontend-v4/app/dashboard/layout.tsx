@@ -17,7 +17,8 @@ export default function DashboardLayout({
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
-    if (sessionStorage.getItem("secop_admin") === "true") {
+    const stored = sessionStorage.getItem("secop_admin")
+    if (stored === btoa(ADMIN_PASS)) {
       setAuthed(true)
     }
     setChecking(false)
@@ -25,7 +26,7 @@ export default function DashboardLayout({
 
   function login() {
     if (pass === ADMIN_PASS) {
-      sessionStorage.setItem("secop_admin", "true")
+      sessionStorage.setItem("secop_admin", btoa(ADMIN_PASS))
       setAuthed(true)
       setLoginErr(false)
     } else {
