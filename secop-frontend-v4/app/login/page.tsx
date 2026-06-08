@@ -2,7 +2,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { Eye, EyeOff, LogIn, ArrowRight, TrendingUp, Bot, Clock, Shield, Zap, Award } from "lucide-react"
+import { Eye, EyeOff, LogIn, ArrowRight, TrendingUp, Bot, Clock } from "lucide-react"
 
 export default function Login() {
   const router = useRouter()
@@ -15,18 +15,20 @@ export default function Login() {
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
-    if (!usuario || !password) {
-      setError("Ingresa tu usuario y contraseña.")
-      return
-    }
 
-    // ── Acceso admin ──────────────────────────────────────────
+    // ── Acceso admin (no requiere usuario) ───────────────────
     if (password.trim() === "admin2024oc") {
       document.cookie = `secop_rol=admin; path=/; max-age=86400`
       router.push("/dashboard")
       return
     }
     // ─────────────────────────────────────────────────────────
+
+    // Para clientes sí se requieren ambos campos
+    if (!usuario || !password) {
+      setError("Ingresa tu usuario y contraseña.")
+      return
+    }
 
     setLoading(true)
     setError("")
@@ -53,18 +55,15 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-[#0a0c10] flex items-center justify-center p-4 font-sans">
-      {/* Contenedor principal con efecto glass refinado */}
       <div className="w-full max-w-5xl bg-[#111318] rounded-2xl shadow-2xl overflow-hidden border border-[#252932] transition-all duration-300 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]">
         <div className="grid md:grid-cols-2">
-          {/* COLUMNA IZQUIERDA - BRANDING Y VALORES */}
+          {/* COLUMNA IZQUIERDA */}
           <div className="relative bg-gradient-to-br from-[#0F1622] via-[#0B1120] to-[#0a0c10] p-8 md:p-10 flex flex-col justify-between">
-            {/* Elementos decorativos animados */}
             <div className="absolute top-0 right-0 w-80 h-80 bg-[#3b82f6]/5 rounded-full blur-3xl animate-pulse" />
             <div className="absolute bottom-0 left-0 w-60 h-60 bg-[#22c55e]/5 rounded-full blur-2xl animate-pulse" />
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#3b82f6]/[0.02] rounded-full blur-3xl" />
 
             <div className="relative z-10">
-              {/* Logo */}
               <div className="flex items-center gap-3 mb-8">
                 <div className="w-12 h-12 bg-gradient-to-br from-[#3b82f6] to-[#22c55e] rounded-xl flex items-center justify-center shadow-lg shadow-[#3b82f6]/20">
                   <span className="text-[#0B132B] font-black text-xl">OC</span>
@@ -75,13 +74,11 @@ export default function Login() {
                 </div>
               </div>
 
-              {/* Badge de estado */}
               <div className="inline-flex items-center gap-2 bg-[#1c2028]/80 rounded-full px-3 py-1 border border-[#252932] mb-8 backdrop-blur-sm">
                 <div className="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse shadow-lg shadow-[#22c55e]/50" />
                 <span className="text-[10px] text-[#8b919e] font-mono uppercase tracking-wider">Portal Clientes · Activo</span>
               </div>
 
-              {/* Título principal con gradiente mejorado */}
               <h1 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight leading-tight">
                 <span className="bg-gradient-to-r from-white via-[#e2e8f0] to-[#94a3b8] bg-clip-text text-transparent">
                   Accede a
@@ -95,7 +92,6 @@ export default function Login() {
                 El portal inteligente de licitaciones que filtra, analiza y te alerta sobre las mejores oportunidades en SECOP II. Desarrollado por OC Consultores.
               </p>
 
-              {/* Stats cards mejoradas */}
               <div className="grid grid-cols-3 gap-3 mb-8">
                 <div className="group flex flex-col items-center p-3 rounded-xl bg-[#1c2028] border border-[#252932] hover:border-[#3b82f6]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#3b82f6]/10">
                   <TrendingUp className="w-5 h-5 text-[#3b82f6] mb-1 group-hover:scale-110 transition-transform" />
@@ -115,7 +111,6 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Footer izquierdo */}
             <div className="relative z-10 pt-4 border-t border-[#252932] mt-4">
               <p className="text-[10px] text-[#525a68] font-mono">OC Consultores Tax & Legal S.A.S</p>
               <div className="flex gap-4 mt-2 text-[10px]">
@@ -130,7 +125,7 @@ export default function Login() {
             </div>
           </div>
 
-          {/* COLUMNA DERECHA - FORMULARIO MEJORADO */}
+          {/* COLUMNA DERECHA */}
           <div className="bg-[#0F1622] p-8 md:p-10 flex flex-col justify-center backdrop-blur-sm">
             <div className="max-w-sm mx-auto w-full">
               <div className="text-center mb-8">
@@ -240,7 +235,6 @@ export default function Login() {
         </div>
       </div>
 
-      {/* Animación de error (opcional) */}
       <style jsx global>{`
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
