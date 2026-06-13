@@ -12,7 +12,7 @@ import {
   Clock, PieChart as PieChartIcon, Zap, CheckCircle, MapPin, Briefcase,
   Filter, DollarSign, MessageSquare, HelpCircle,
   Calendar, ChevronDown, ChevronUp, Sun, Moon, TrendingUp, Eye, EyeOff,
-  AlertCircle
+  AlertCircle, MessageCircle, RefreshCw
 } from "lucide-react"
 
 // ---------- HELPERS ----------
@@ -27,6 +27,10 @@ function fmt(n: number | null | undefined): string {
 function formatFechaCorta(f: string | null): string {
   if (!f) return "—"
   return new Date(f).toLocaleDateString("es-CO", { day: "numeric", month: "short", year: "numeric" })
+}
+function formatFechaHora(f: string | null): string {
+  if (!f) return "—"
+  return new Date(f).toLocaleString("es-CO", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
 }
 function diasRestantes(f: string | null): number | null {
   if (!f) return null
@@ -82,6 +86,30 @@ function BienvenidaToast({ nombre, onClose }: { nombre: string; onClose: () => v
   )
 }
 
+// ---------- COMPONENTE NOTIFICACIÓN ----------
+function NotificacionItem({ icon: Icon, mensaje, fecha, link, color }: { icon: any; mensaje: string; fecha: string; link?: string; color?: string }) {
+  return (
+    <div className={`flex items-start gap-3 ${link ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors' : ''} p-2`}>
+      <div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0">
+        <Icon size={12} className={color || "text-blue-600"} />
+      </div>
+      <div className="flex-1">
+        {link ? (
+          <a href={link} className="block">
+            <p className="text-[12px] text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{mensaje}</p>
+            <span className="text-[9px] text-gray-400 font-mono">{formatFechaHora(fecha)}</span>
+          </a>
+        ) : (
+          <>
+            <p className="text-[12px] text-gray-900 dark:text-white">{mensaje}</p>
+            <span className="text-[9px] text-gray-400 font-mono">{formatFechaHora(fecha)}</span>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function PortalCliente() {
   const router = useRouter()
   const params = useParams()
@@ -112,6 +140,7 @@ export default function PortalCliente() {
   const [nuevoComentario, setNuevoComentario] = useState<Record<string, string>>({})
   const [enviandoComentario, setEnviandoComentario] = useState<Record<string, boolean>>({})
   const [darkMode, setDarkMode] = useState(false)
+  const [actividadReciente, setActividadReciente] = useState<{ icon: any; mensaje: string; fecha: string; link?: string; color?: string }[]>([])
 
   useEffect(() => {
     const stored = localStorage.getItem("theme")
@@ -160,6 +189,64 @@ export default function PortalCliente() {
       .eq("estado", "descartado")
       .order("updated_at", { ascending: false })
     setDescartados(desc || [])
+
+    // Cargar actividad reciente (comentarios del admin y cambios de etapa en procesos de acompañamiento)
+    const fechaLimiteActividad = new Date()
+    fechaLimiteActividad.setDate(fechaLimiteActividad.getDate() - 7)
+    const fechaLimiteStr = fechaLimiteActividad.toISOString()
+
+    // 1. Obtener comentarios del admin en procesos de acompañamiento del cliente
+    const { data: comentariosRecientes } = await supabase
+      .from("comentarios")
+      .select("*, procesos!inner(referencia, en_acompanamiento)")
+      .eq("cliente_id", id)
+      .eq("autor", "admin")
+      .gte("created_at", fechaLimiteStr)
+      .order("created_at", { ascending: false })
+
+    // 2. Obtener cambios de etapa (usando fecha_etapa_* actualizadas recientemente)
+    const acompanamientoProcesos = allProcesos?.filter(p => p.en_acompanamiento === true) || []
+    const cambiosEtapa: { proceso: Proceso; etapa: number; fecha: string }[] = []
+    for (const proc of acompanamientoProcesos) {
+      for (let i = 0; i <= 4; i++) {
+        const fechaEtapa = proc[`fecha_etapa_${i}` as keyof Proceso] as string | null
+        if (fechaEtapa && new Date(fechaEtapa) >= fechaLimiteActividad) {
+          cambiosEtapa.push({ proceso: proc, etapa: i, fecha: fechaEtapa })
+        }
+      }
+    }
+    cambiosEtapa.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
+
+    // Construir actividad reciente (máximo 5 elementos)
+    const items: any[] = []
+
+    // Comentarios del admin
+    if (comentariosRecientes) {
+      comentariosRecientes.slice(0, 3).forEach(com => {
+        items.push({
+          icon: MessageCircle,
+          mensaje: `Admin respondió en ${com.procesos?.referencia || "proceso"}: "${com.texto.substring(0, 60)}${com.texto.length > 60 ? "..." : ""}"`,
+          fecha: com.created_at,
+          link: `/cliente/${id}?tab=acompanamiento&proceso=${com.proceso_id}`,
+          color: "text-blue-600"
+        })
+      })
+    }
+
+    // Cambios de etapa
+    cambiosEtapa.slice(0, 3).forEach(ce => {
+      items.push({
+        icon: RefreshCw,
+        mensaje: `${ce.proceso.referencia} avanzó a "${ETAPAS[ce.etapa]}"`,
+        fecha: ce.fecha,
+        link: `/cliente/${id}?tab=acompanamiento&proceso=${ce.proceso.id}`,
+        color: "text-emerald-600"
+      })
+    })
+
+    // Limitar a 5 items en total y ordenar por fecha descendente
+    items.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
+    setActividadReciente(items.slice(0, 5))
 
     setLoading(false)
     const key = `bienvenida_${id}`
@@ -279,7 +366,7 @@ export default function PortalCliente() {
   const totalGanados = ganados.length
   const presupuestoGanado = ganados.reduce((sum, p) => sum + (p.presupuesto || 0), 0)
 
-  // Tendencia basada en created_at (fecha de notificación)
+  // Tendencia basada en created_at (fecha de notificación) - tooltip simplificado
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = procesos.filter(p => p.created_at && new Date(p.created_at) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
@@ -288,14 +375,6 @@ export default function PortalCliente() {
     tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1)
   })
   let tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
-  let trendData: { fecha: string; trend: number | null }[] = []
-  if (tendenciaData.length >= 2) {
-    const n = tendenciaData.length, indices = Array.from({ length: n }, (_, i) => i)
-    const sumX = indices.reduce((a,b) => a + b, 0), sumY = tendenciaData.reduce((a,b) => a + b.count, 0)
-    const sumXY = indices.reduce((a, i) => a + i * tendenciaData[i].count, 0), sumX2 = indices.reduce((a, i) => a + i * i, 0)
-    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX), intercept = (sumY - slope * sumX) / n
-    trendData = tendenciaData.map((point, i) => ({ fecha: point.fecha, trend: Math.max(0, slope * i + intercept) }))
-  }
 
   const deptoMap = new Map<string, number>()
   procesos.forEach(p => { if (p.departamento) deptoMap.set(p.departamento, (deptoMap.get(p.departamento) || 0) + 1) })
@@ -332,6 +411,20 @@ export default function PortalCliente() {
     fontSize: '11px',
     color: darkMode ? '#fff' : '#1f2937',
     boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+  }
+
+  // Tooltip personalizado para la tendencia (solo mostrar el número de procesos sin decimales)
+  const renderTrendTooltip = (props: any) => {
+    const { active, payload, label } = props
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-gray-900 dark:bg-gray-800 text-white px-3 py-2 rounded-lg shadow-lg text-xs">
+          <p className="font-semibold">{label}</p>
+          <p>{Math.round(payload[0].value)} proceso{Math.round(payload[0].value) !== 1 ? 's' : ''}</p>
+        </div>
+      )
+    }
+    return null
   }
 
   // Tooltip personalizado para el pastel
@@ -395,10 +488,9 @@ export default function PortalCliente() {
                       <defs><linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/><stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/></linearGradient></defs>
                       <XAxis dataKey="fecha" tick={{ fontSize: 9, fill: '#6b7280' }} interval="preserveStartEnd" tickFormatter={(v) => v.slice(5)} />
                       <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} allowDecimals={false} domain={[0, 'dataMax + 1']} />
-                      <Tooltip contentStyle={tooltipStyle} labelFormatter={(l) => `Fecha: ${l}`} />
+                      <Tooltip content={renderTrendTooltip} />
                       <Area type="monotone" dataKey="count" stroke="none" fill="url(#colorCount)" />
                       <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} />
-                      {trendData.length > 0 && <Line type="linear" dataKey="trend" data={trendData} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="3 3" dot={false} />}
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -445,9 +537,8 @@ export default function PortalCliente() {
             </div>
           </div>
 
-          {/* COLUMNA CENTRAL */}
+          {/* COLUMNA CENTRAL - PROCESOS (igual que antes, sin cambios en la estructura) */}
           <div className="lg:col-span-6 space-y-4">
-            {/* Cabecera de pestañas y filtros (igual que antes) */}
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2"><h2 className="text-gray-900 dark:text-white font-bold text-lg flex items-center gap-2"><Zap size={16} className="text-emerald-600"/>{tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : tab === "acompanamiento" ? "Acompañamiento" : "Descartados"}</h2>{(tab === "nuevos" || tab === "interesado") && (<button onClick={() => setFiltroPanel(!filtroPanel)} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${filtrosActivos > 0 ? "bg-blue-600 text-white" : "bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}><Filter size={10}/> Filtrar {filtrosActivos > 0 && `(${filtrosActivos})`}</button>)}</div>
               <div className="text-[10px] text-gray-500 font-mono">{tab === "acompanamiento" ? `${acompanamiento.length} solicitud(es)` : `${listaActual.length} oportunidad(es) · ${fmt(listaActual.reduce((s,p)=>s+(p.presupuesto||0),0))}`}</div>
@@ -466,7 +557,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO (con alerta de actualización) */}
+            {/* PESTAÑA ACOMPAÑAMIENTO (sin cambios en la estructura, solo se usa la misma lógica) */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {acompanamiento.length === 0 ? (
@@ -484,7 +575,6 @@ export default function PortalCliente() {
                     const isDetailsHidden = hideDetails[proc.id] || false
                     const dias = diasRestantes(proc.fecha_oferta)
                     const urgente = dias !== null && dias <= 3 && dias >= 0
-                    // Verificar si el proceso fue actualizado después de la última visita del cliente
                     const fueActualizado = proc.updated_at && cliente?.ultima_visita && new Date(proc.updated_at) > new Date(cliente.ultima_visita)
                     return (
                       <div key={proc.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
@@ -503,10 +593,7 @@ export default function PortalCliente() {
                           <div className="text-right flex-shrink-0">
                             <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proc.presupuesto)}</div>
                             <div className="flex flex-col items-end">
-                              <div className="flex items-center justify-end gap-1 mt-1">
-                                <Clock size={12} className="text-gray-500" />
-                                <span className={`text-[11px] font-mono ${urgente ? "text-amber-600 dark:text-amber-400" : "text-gray-500"}`}>Cierra en {dias}d</span>
-                              </div>
+                              <div className="flex items-center justify-end gap-1 mt-1"><Clock size={12} className="text-gray-500" /><span className={`text-[11px] font-mono ${urgente ? "text-amber-600 dark:text-amber-400" : "text-gray-500"}`}>Cierra en {dias}d</span></div>
                               <div className="text-[9px] text-gray-400 font-mono">{formatFechaCorta(proc.fecha_oferta)}</div>
                             </div>
                             <div className="flex items-center justify-end gap-2 mt-1">
@@ -612,7 +699,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* DESCARTADOS */}
+            {/* DESCARTADOS (sin cambios) */}
             {tab === "descartados" && (
               <div className="space-y-3">
                 {descartados.length === 0 ? (<div className="text-center py-16 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-5xl mb-4">🗑</div><div className="text-[15px] font-semibold text-gray-900 dark:text-white mb-2">Sin procesos descartados</div><div className="text-[13px] text-gray-500">Se eliminan automáticamente después de 30 días.</div></div>) : (
@@ -622,7 +709,7 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA */}
+          {/* COLUMNA DERECHA - con actividad reciente mejorada */}
           <div className="lg:col-span-3 space-y-5">
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
@@ -655,9 +742,29 @@ export default function PortalCliente() {
                 )}
               </div>
             </div>
+            {/* Actividad Reciente mejorada */}
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2>
-              <div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{procesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div>
+              <div className="space-y-3">
+                {/* Actividades fijas (portal y análisis) */}
+                <div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800">
+                  <div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div>
+                  <div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div>
+                </div>
+                <div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800">
+                  <div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div>
+                  <div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{procesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div>
+                </div>
+                {/* Notificaciones dinámicas (comentarios admin y cambios de etapa) */}
+                {actividadReciente.length === 0 && (
+                  <div className="text-center py-4">
+                    <p className="text-[11px] text-gray-500">No hay actividad reciente</p>
+                  </div>
+                )}
+                {actividadReciente.map((item, idx) => (
+                  <NotificacionItem key={idx} icon={item.icon} mensaje={item.mensaje} fecha={item.fecha} link={item.link} color={item.color} />
+                ))}
+              </div>
             </div>
             {cliente?.drive_url && (<a href={cliente.drive_url} target="_blank" rel="noreferrer" className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-4 flex items-center gap-3 hover:shadow-sm transition-all"><FolderOpen size={18} className="text-blue-600" /><div><p className="text-[12px] font-medium text-gray-900 dark:text-white">Google Drive</p><p className="text-[10px] text-gray-500">Mis documentos</p></div></a>)}
           </div>
