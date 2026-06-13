@@ -90,18 +90,27 @@ export interface Metrics {
 export interface SolicitudAcompanamiento {
   id: string
   cliente_id: string
+  proceso_id?: string | null               // Opcional: vínculo al proceso asociado
   empresa: string
   numero_proceso: string
   enlace: string
   observaciones: string | null
   estado: 'pendiente' | 'en_proceso' | 'atendida'
+  etapa_actual?: number                    // Etapa actual (0-4)
+  etapa_nombre?: string | null             // Nombre personalizado de la etapa
+  fecha_etapa_0?: string | null
+  fecha_etapa_1?: string | null
+  fecha_etapa_2?: string | null
+  fecha_etapa_3?: string | null
+  fecha_etapa_4?: string | null
   created_at: string
   updated_at: string
 }
 
 export interface Comentario {
   id: string
-  proceso_id: string
+  proceso_id?: string | null              // Puede estar asociado a un proceso
+  solicitud_id?: string | null            // O a una solicitud de acompañamiento
   cliente_id: string
   autor: 'cliente' | 'admin'
   texto: string
