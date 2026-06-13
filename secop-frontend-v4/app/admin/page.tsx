@@ -650,7 +650,6 @@ export default function AdminPage() {
   // ------ Datos derivados ------
   const clientesFilt = clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()) || c.id.toLowerCase().includes(busqueda.toLowerCase()))
 
-  // Procesos filtrados por cliente, estado y búsqueda (usado en pestañas generales)
   const procesosFilt = procesos.filter(p => {
     if (clienteSel && p.cliente_id !== clienteSel) return false
     if (estadoSel !== "todos" && p.estado !== estadoSel) return false
@@ -1052,7 +1051,13 @@ export default function AdminPage() {
         {tab === "feedback" && (
           <div className="bg-[#15181f] border border-[#252932] rounded-xl overflow-auto">
             <table className="w-full text-sm">
-              <thead className="border-b border-[#252932]"><tr>{["Cliente","Proceso","Acción","Nota","Fecha"].map(h=><th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>)}</thead>
+              <thead className="border-b border-[#252932]">
+                <tr>
+                  {["Cliente","Proceso","Acción","Nota","Fecha"].map(h => (
+                    <th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
                 {feedback.slice(0,100).map(f=>{
                   const proc=procesos.find(p=>p.id===f.proceso_id)
