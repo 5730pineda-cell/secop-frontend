@@ -90,8 +90,8 @@ export default function PortalCliente() {
   const id = params.id as string
 
   const [cliente, setCliente] = useState<Cliente | null>(null)
-  const [procesos, setProcesos] = useState<Proceso[]>([])       // para pestañas Nuevos/Intereses (excluye los que están en acompañamiento activo)
-  const [todosProcesos, setTodosProcesos] = useState<Proceso[]>([]) // todos los procesos del cliente (sin exclusión)
+  const [procesos, setProcesos] = useState<Proceso[]>([])
+  const [todosProcesos, setTodosProcesos] = useState<Proceso[]>([])
   const [descartados, setDescartados] = useState<Proceso[]>([])
   const [solicitudes, setSolicitudes] = useState<SolicitudAcompanamiento[]>([])
   const [loading, setLoading] = useState(true)
@@ -117,7 +117,6 @@ export default function PortalCliente() {
   const [enviandoComentarioSolicitud, setEnviandoComentarioSolicitud] = useState<Record<string, boolean>>({})
   const [darkMode, setDarkMode] = useState(false)
 
-  // Modo oscuro
   useEffect(() => {
     const stored = localStorage.getItem("theme")
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -147,18 +146,16 @@ export default function PortalCliente() {
     const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
-    // Obtener todas las solicitudes
     const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id)
     setSolicitudes(sol || [])
 
-    // IDs de procesos que tienen solicitud activa (pendiente o en_proceso) para excluirlos de la lista "procesos"
     const idsExcluir = (sol || [])
       .filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso')
       .map(s => s.proceso_id)
       .filter(Boolean) as string[]
 
     const hoy = new Date().toISOString()
-    // Primero obtener TODOS los procesos del cliente (sin exclusión) para usarlos en las tarjetas de acompañamiento
+    // Todos los procesos (para gráficos y detalles de acompañamiento)
     const { data: allProcesos } = await supabase
       .from("procesos")
       .select("*")
@@ -168,7 +165,7 @@ export default function PortalCliente() {
       .order("fecha_oferta", { ascending: true })
     setTodosProcesos(allProcesos || [])
 
-    // Luego obtener la lista filtrada (excluyendo los que están en acompañamiento activo)
+    // Procesos excluyendo los que tienen solicitud activa (para Nuevos/Intereses)
     let query = supabase
       .from("procesos")
       .select("*")
@@ -176,7 +173,6 @@ export default function PortalCliente() {
       .neq("estado", "descartado")
       .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
       .order("fecha_oferta", { ascending: true })
-
     if (idsExcluir.length > 0) {
       query = query.not("id", "in", `(${idsExcluir.join(",")})`)
     }
@@ -206,21 +202,51 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
+  // --- FUNCIÓN ENVIAR A ACOMPAÑAMIENTO CORREGIDA (optimista) ---
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
     const proc = todosProcesos.find(x => x.id === procesoId)
     if (!proc) return
     setSaving(prev => ({ ...prev, [procesoId]: "acompanamiento" }))
-    const { error } = await supabase.from("solicitudes_acompanamiento").insert({
-      cliente_id: id, proceso_id: procesoId, empresa: cliente?.nombre || "Cliente",
-      numero_proceso: proc.referencia, enlace: proc.url || "",
-      observaciones: `Solicitud de acompañamiento.\nEntidad: ${proc.entidad}\nPresupuesto: ${fmt(proc.presupuesto)}`,
-      estado: "pendiente", etapa_actual: 0
-    })
-    if (error) mostrarToast("Error: " + error.message, "error")
-    else { mostrarToast("Solicitud enviada", "ok"); await cargar(); setTab("acompanamiento") }
+
+    const { data: newSolicitud, error } = await supabase
+      .from("solicitudes_acompanamiento")
+      .insert({
+        cliente_id: id,
+        proceso_id: procesoId,
+        empresa: cliente?.nombre || "Cliente",
+        numero_proceso: proc.referencia,
+        enlace: proc.url || "",
+        observaciones: `Solicitud de acompañamiento.\nEntidad: ${proc.entidad}\nPresupuesto: ${fmt(proc.presupuesto)}`,
+        estado: "pendiente",
+        etapa_actual: 0
+      })
+      .select()
+      .single()
+
+    if (error) {
+      mostrarToast("Error: " + error.message, "error")
+      setSaving(prev => ({ ...prev, [procesoId]: false }))
+      return
+    }
+
+    // Actualización optimista local
+    if (newSolicitud) {
+      // Agregar la nueva solicitud al inicio de la lista
+      setSolicitudes(prev => [newSolicitud, ...prev])
+      // Eliminar el proceso de las listas "procesos" y "todosProcesos"
+      setProcesos(prev => prev.filter(p => p.id !== procesoId))
+      setTodosProcesos(prev => prev.filter(p => p.id !== procesoId))
+    }
+
+    mostrarToast("Solicitud enviada. El proceso ahora está en Acompañamiento.", "ok")
+    setTab("acompanamiento")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
+
+    // Recargar en segundo plano para sincronizar (sin bloquear la UI)
+    cargar().catch(console.error)
   }
+  // --- FIN CORRECCIÓN ---
 
   async function descartar(procesoId: string) {
     setProcesoADescartar(null)
@@ -274,7 +300,7 @@ export default function PortalCliente() {
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
   function limpiarFiltros() { setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("") }
 
-  // Datos para gráficos (usamos todosProcesos para que incluya los de acompañamiento)
+  // Datos para gráficos (usando todosProcesos)
   const nuevos = todosProcesos.filter(p => p.estado === "nuevo")
   const interesados = todosProcesos.filter(p => p.estado === "interesado")
   const solicitudesActivas = solicitudes.filter(s => s.estado === "pendiente" || s.estado === "en_proceso")
@@ -284,7 +310,7 @@ export default function PortalCliente() {
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
-  // Tendencia (con todosProcesos)
+  // Tendencia
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = todosProcesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
@@ -381,7 +407,7 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - GRÁFICOS */}
+          {/* COLUMNA IZQUIERDA - GRÁFICOS (sin cambios) */}
           <div className="lg:col-span-3 space-y-5">
             {tendenciaData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
@@ -462,7 +488,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO - usando todosProcesos para obtener los datos del proceso */}
+            {/* PESTAÑA ACOMPAÑAMIENTO */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
@@ -473,7 +499,6 @@ export default function PortalCliente() {
                   </div>
                 ) : (
                   solicitudes.map(sol => {
-                    // Buscar el proceso en TODOS los procesos (todosProcesos) o en descartados
                     const proceso = todosProcesos.find(p => p.id === sol.proceso_id) || descartados.find(p => p.id === sol.proceso_id)
                     if (!comentariosSolicitud[sol.id]) cargarComentariosSolicitud(sol.id)
                     const etapaActual = sol.etapa_actual ?? 0
@@ -482,7 +507,6 @@ export default function PortalCliente() {
                     const isDetailsHidden = hideDetails[sol.id] || false
                     return (
                       <div key={sol.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
-                        {/* Cabecera con presupuesto grande a la derecha */}
                         <div className="flex justify-between items-start gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -504,10 +528,8 @@ export default function PortalCliente() {
                             </div>
                           </div>
                         </div>
-
                         {!isCollapsed && (
                           <>
-                            {/* Descripción y metadatos */}
                             <div className="mt-3">
                               <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">{proceso?.objeto || sol.observaciones}</p>
                               <div className="flex flex-wrap gap-2 mt-2">
@@ -516,8 +538,6 @@ export default function PortalCliente() {
                                 {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}
                               </div>
                             </div>
-
-                            {/* Gestión y comentarios (ocultable con el ojo) */}
                             <div className="border-t border-gray-200 dark:border-gray-800 mt-4 pt-3">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span>
@@ -564,7 +584,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA NUEVOS / INTERESES (usando la lista filtrada procesos) */}
+            {/* PESTAÑA NUEVOS / INTERESES */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
