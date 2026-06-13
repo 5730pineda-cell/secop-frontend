@@ -5,13 +5,13 @@ import { supabase } from "@/lib/supabase"
 import type { Cliente, Proceso, Comentario, SolicitudAcompanamiento } from "@/types"
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  AreaChart, Area, Legend
+  LineChart, Line, Area, AreaChart, Legend
 } from "recharts"
 import {
   Bell, Search, LogOut, ExternalLink, Send, FolderOpen, Archive,
   Clock, PieChart as PieChartIcon, Zap, CheckCircle, MapPin, Briefcase,
   Filter, DollarSign, MessageSquare, HelpCircle,
-  Calendar, ChevronDown, ChevronUp, Sun, Moon, TrendingUp, Eye, EyeOff, TrendingDown
+  Calendar, ChevronDown, ChevronUp, Sun, Moon, TrendingUp, Eye, EyeOff
 } from "lucide-react"
 
 // ---------- HELPERS ----------
@@ -36,7 +36,7 @@ function diasRestantes(f: string | null): number | null {
 
 const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 
-// ---------- TIMELINE (corregida: se detiene en Resultado) ----------
+// ---------- TIMELINE CORREGIDA: último círculo con check y barra exacta ----------
 function Timeline({ etapa }: { etapa: number }) {
   const idx = Math.min(Math.max(0, etapa), 4)
   return (
@@ -44,12 +44,21 @@ function Timeline({ etapa }: { etapa: number }) {
       <div className="absolute h-[2px] bg-gray-200 dark:bg-gray-800 w-full rounded-full"></div>
       <div className="absolute h-[2px] bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full transition-all duration-500" style={{ width: `${(idx / 4) * 100}%` }}></div>
       {ETAPAS.map((e, i) => {
-        const isActive = i <= idx
-        const isCurrent = i === idx
+        const isActive = i < idx        // etapas completamente pasadas (check)
+        const isCurrent = i === idx     // etapa actual
+        const isLast = i === 4          // última etapa (Resultado)
+        let displayText = ""
+        if (isLast && idx === 4) {
+          displayText = "✓"              // si ya pasó la última, muestra check
+        } else if (isActive) {
+          displayText = "✓"
+        } else {
+          displayText = (i + 1).toString()
+        }
         return (
           <div key={i} className="relative z-10 flex flex-col items-center" style={{ width: `${100 / 4}%` }}>
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all ${isActive ? "bg-gradient-to-br from-blue-500 to-emerald-500 text-white shadow-md" : "bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-500"} ${isCurrent ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900" : ""}`}>
-              {isActive && i < idx ? "✓" : i + 1}
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all ${(isActive || (isCurrent && idx === 4)) ? "bg-gradient-to-br from-blue-500 to-emerald-500 text-white shadow-md" : "bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-500"} ${isCurrent ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900" : ""}`}>
+              {displayText}
             </div>
             <span className="text-[9px] text-gray-500 dark:text-gray-500 mt-1 hidden md:block">{e}</span>
           </div>
@@ -97,7 +106,7 @@ export default function PortalCliente() {
   const [showBienvenida, setShowBienvenida] = useState(false)
   const [procesoADescartar, setProcesoADescartar] = useState<Proceso | null>(null)
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({})
-  const [hideDetails, setHideDetails] = useState<Record<string, boolean>>({}) // oculta timeline + comentarios
+  const [hideDetails, setHideDetails] = useState<Record<string, boolean>>({})
   const [filtroPanel, setFiltroPanel] = useState(false)
   const [fDepto, setFDepto] = useState("")
   const [fEntidad, setFEntidad] = useState("")
@@ -242,7 +251,7 @@ export default function PortalCliente() {
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
-  // Tendencia últimos 30 días (AreaChart más atractivo)
+  // Tendencia últimos 30 días con línea de tendencia (line chart)
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
@@ -250,14 +259,23 @@ export default function PortalCliente() {
     const fechaKey = new Date(p.fecha_oferta!).toISOString().split('T')[0]
     tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1)
   })
-  const tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
-  // Indicador de tendencia (últimos 7 días vs anteriores)
-  let tendenciaIndicator = null
-  if (tendenciaData.length >= 14) {
-    const last7 = tendenciaData.slice(-7).reduce((s,d)=> s + d.count, 0)
-    const prev7 = tendenciaData.slice(-14, -7).reduce((s,d)=> s + d.count, 0)
-    if (last7 > prev7) tendenciaIndicator = { direction: 'up', percent: Math.round(((last7 - prev7) / prev7)*100) }
-    else if (last7 < prev7) tendenciaIndicator = { direction: 'down', percent: Math.round(((prev7 - last7) / prev7)*100) }
+  let tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
+  
+  // Calcular línea de tendencia (regresión lineal simple)
+  let trendData: { fecha: string; trend: number | null }[] = []
+  if (tendenciaData.length >= 2) {
+    const n = tendenciaData.length
+    const indices = Array.from({ length: n }, (_, i) => i)
+    const sumX = indices.reduce((a,b) => a + b, 0)
+    const sumY = tendenciaData.reduce((a,b) => a + b.count, 0)
+    const sumXY = indices.reduce((a, i) => a + i * tendenciaData[i].count, 0)
+    const sumX2 = indices.reduce((a, i) => a + i * i, 0)
+    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
+    const intercept = (sumY - slope * sumX) / n
+    trendData = tendenciaData.map((point, i) => ({
+      fecha: point.fecha,
+      trend: Math.max(0, slope * i + intercept)
+    }))
   }
 
   // Procesos por departamento
@@ -289,7 +307,6 @@ export default function PortalCliente() {
   if (loading) return <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
   if (error) return <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center text-red-500">{error}</div>
 
-  // Tooltip dinámico según tema
   const tooltipStyle = {
     backgroundColor: darkMode ? '#1f2937' : '#ffffff',
     border: darkMode ? 'none' : '1px solid #e5e7eb',
@@ -335,23 +352,15 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - Tendencia (AreaChart), Depto, Presupuesto */}
+          {/* COLUMNA IZQUIERDA */}
           <div className="lg:col-span-3 space-y-5">
-            {/* Tendencia de procesos - AreaChart con gradiente */}
+            {/* Tendencia con línea de tendencia */}
             {tendenciaData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2"><TrendingUp size={14} className="text-blue-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tendencia de procesos</h2></div>
-                  {tendenciaIndicator && (
-                    <div className={`text-[10px] flex items-center gap-1 ${tendenciaIndicator.direction === 'up' ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {tendenciaIndicator.direction === 'up' ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                      {tendenciaIndicator.percent}% {tendenciaIndicator.direction === 'up' ? '↑' : '↓'}
-                    </div>
-                  )}
-                </div>
+                <div className="flex items-center gap-2 mb-4"><TrendingUp size={14} className="text-blue-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tendencia de procesos</h2></div>
                 <div className="h-[200px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={tendenciaData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                    <LineChart data={tendenciaData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                       <defs>
                         <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
@@ -361,11 +370,15 @@ export default function PortalCliente() {
                       <XAxis dataKey="fecha" tick={{ fontSize: 9, fill: '#6b7280' }} interval="preserveStartEnd" tickFormatter={(v) => v.slice(5)} />
                       <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} allowDecimals={false} domain={[0, 'dataMax + 1']} />
                       <Tooltip contentStyle={tooltipStyle} labelFormatter={(l) => `Fecha: ${l}`} />
-                      <Area type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} fill="url(#colorCount)" />
-                    </AreaChart>
+                      <Area type="monotone" dataKey="count" stroke="none" fill="url(#colorCount)" />
+                      <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} />
+                      {trendData.length > 0 && (
+                        <Line type="linear" dataKey="trend" data={trendData} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="3 3" dot={false} />
+                      )}
+                    </LineChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="text-center text-[9px] text-gray-500 mt-2">Últimos 30 días</div>
+                <div className="text-center text-[9px] text-gray-500 mt-2">Últimos 30 días (línea punteada: tendencia)</div>
               </div>
             )}
 
@@ -386,7 +399,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* Distribución presupuestaria (pastel con tooltip legible) */}
+            {/* Distribución presupuestaria - pastel con tooltip legible */}
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-4"><PieChartIcon size={14} className="text-emerald-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Distribución presupuestaria</h2></div>
               <div className="h-[200px] w-full">
@@ -432,7 +445,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO con presupuesto visible y ocultar timeline+comentarios */}
+            {/* PESTAÑA ACOMPAÑAMIENTO - presupuesto visible junto al estado */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
@@ -469,7 +482,6 @@ export default function PortalCliente() {
                               {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 block mt-2">Ver SECOP ↗</a>}
                             </div>
 
-                            {/* Sección de seguimiento + comentarios que se ocultan juntos */}
                             <div className="border-t border-gray-200 dark:border-gray-800 pt-3">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span>
