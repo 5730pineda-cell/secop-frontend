@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import type { Cliente, Proceso, Feedback } from "@/types"
+import type { Cliente, Proceso, Feedback, Comentario, SolicitudAcompanamiento } from "@/types"
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   BarChart, Bar, CartesianGrid, PieChart, Pie, Cell, AreaChart, Area
@@ -12,18 +12,17 @@ import {
   Clock, TrendingUp, PieChart as PieChartIcon, Zap, Save, AlertTriangle,
   FileText, CheckCircle, MapPin, Briefcase, Filter, DollarSign, Users,
   Activity, UserCheck, Eye, Trash2, Edit3, ChevronRight, RefreshCw,
-  PlusCircle, BarChart as BarChartIcon
+  PlusCircle, BarChart as BarChartIcon, MessageSquare, Calendar, ChevronDown, ChevronUp, EyeOff, Eye
 } from "lucide-react"
 
 // ---------- CONSTANTES ----------
 const ADMIN_PASS = "admin2024oc"
-const ETAPAS = ["Análisis", "Tu aprobación", "Organización", "Presentación", "Resultado"]
+const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 const DEPARTAMENTOS_CO = [
   "Amazonas","Antioquia","Arauca","Atlántico","Bolívar","Boyacá","Caldas","Caquetá",
   "Casanare","Cauca","Cesar","Chocó","Córdoba","Cundinamarca","Guainía","Guaviare",
   "Huila","La Guajira","Magdalena","Meta","Nariño","Norte de Santander","Putumayo",
-  "Quindío","Risaralda","San Andrés y Providencia","Santander","Sucre","Tolima",
-  "Valle del Cauca","Vaupés","Vichada","Bogotá D.C."
+  "Quindío","Risaralda","Santander","Sucre","Tolima","Valle del Cauca","Vaupés","Vichada","Bogotá D.C."
 ]
 
 // ---------- HELPERS ----------
@@ -39,6 +38,10 @@ function fmtFecha(f: string | null) {
   if (!f) return "—"
   return new Date(f).toLocaleDateString("es-CO", { day: "2-digit", month: "short" })
 }
+function fmtFechaHora(f: string | null) {
+  if (!f) return "—"
+  return new Date(f).toLocaleString("es-CO", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+}
 function diasRestantes(f: string | null) {
   if (!f) return null
   const hoy = new Date(); hoy.setHours(0,0,0,0)
@@ -49,26 +52,18 @@ function initials(nombre: string) {
   return nombre.split(" ").map(w => w[0]).join("").substring(0,2).toUpperCase()
 }
 
-// ---------- COMPONENTES UI ----------
-function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()}>{children}</div>
-    </div>
-  )
-}
-function CloseBtn({ onClose }: { onClose: () => void }) {
-  return <button onClick={onClose} className="w-8 h-8 rounded-lg bg-[#1c2028] border border-[#252932] text-[#525a68] hover:text-white transition-all">✕</button>
-}
-
-// ---------- TIMELINE ADMIN ----------
+// ---------- TIMELINE ADMIN (mejorado, con check y tooltip) ----------
 function TimelineAdmin({ procesoId, etapa, onUpdate }: { procesoId: string; etapa: number; onUpdate: (id: string, i: number) => void }) {
   const [updating, setUpdating] = useState(false)
-  const idx = typeof etapa === "number" ? etapa : 0
+  const idx = Math.min(Math.max(0, etapa), 4)
   async function irEtapa(i: number) {
     if (updating || i === idx) return
     setUpdating(true)
-    await supabase.from("procesos").update({ etapa_seguimiento: i }).eq("id", procesoId)
+    // Actualizar etapa_seguimiento y registrar fecha de la etapa
+    const fecha = new Date().toISOString()
+    const updateData: any = { etapa_seguimiento: i }
+    updateData[`fecha_etapa_${i}`] = fecha
+    await supabase.from("procesos").update(updateData).eq("id", procesoId)
     onUpdate(procesoId, i)
     setUpdating(false)
   }
@@ -77,11 +72,16 @@ function TimelineAdmin({ procesoId, etapa, onUpdate }: { procesoId: string; etap
       {ETAPAS.map((e, i) => {
         const done = i < idx
         const active = i === idx
+        const isLast = i === 4
+        let displayText = ""
+        if (isLast && idx === 4) displayText = "✓"
+        else if (done) displayText = "✓"
+        else displayText = (i+1).toString()
         return (
           <div key={i} className="flex flex-col items-center flex-1 relative cursor-pointer" onClick={() => irEtapa(i)}>
             {i > 0 && <div className="absolute left-[-50%] right-[50%] top-[13px] h-[2px] bg-[#3b82f6] z-0" style={{ background: done || active ? "#3b82f6" : "#252932" }} />}
-            <div className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all ${done ? "bg-[#3b82f6] text-white" : active ? "bg-[#1d4ed8] ring-2 ring-[#3b82f6] ring-offset-2 ring-offset-[#111318] text-white" : "bg-[#1c2028] border border-[#252932] text-[#525a68]"}`}>
-              {done ? "✓" : i+1}
+            <div className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all ${(done || (active && isLast && idx === 4)) ? "bg-[#3b82f6] text-white" : active ? "bg-[#1d4ed8] ring-2 ring-[#3b82f6] ring-offset-2 ring-offset-[#111318] text-white" : "bg-[#1c2028] border border-[#252932] text-[#525a68]"}`}>
+              {displayText}
             </div>
             <span className={`text-[9px] mt-1 text-center ${active ? "text-[#60a5fa]" : done ? "text-[#3b82f6]" : "text-[#525a68]"}`}>{e}</span>
           </div>
@@ -91,7 +91,129 @@ function TimelineAdmin({ procesoId, etapa, onUpdate }: { procesoId: string; etap
   )
 }
 
-// ---------- MODAL NUEVO CLIENTE ----------
+// ---------- COMPONENTE COMENTARIOS ADMIN ----------
+function ComentariosAdmin({ procesoId, clienteId }: { procesoId: string; clienteId: string }) {
+  const [comentarios, setComentarios] = useState<Comentario[]>([])
+  const [nuevoTexto, setNuevoTexto] = useState("")
+  const [enviando, setEnviando] = useState(false)
+  const [cargando, setCargando] = useState(true)
+
+  async function cargarComentarios() {
+    setCargando(true)
+    const { data } = await supabase
+      .from("comentarios")
+      .select("*")
+      .eq("proceso_id", procesoId)
+      .order("created_at", { ascending: true })
+    if (data) setComentarios(data as Comentario[])
+    setCargando(false)
+  }
+
+  async function enviarComentario() {
+    if (!nuevoTexto.trim()) return
+    setEnviando(true)
+    const { error } = await supabase.from("comentarios").insert({
+      proceso_id: procesoId,
+      cliente_id: clienteId,
+      autor: "admin",
+      texto: nuevoTexto.trim()
+    })
+    if (!error) {
+      await cargarComentarios()
+      setNuevoTexto("")
+    }
+    setEnviando(false)
+  }
+
+  useEffect(() => { if (procesoId) cargarComentarios() }, [procesoId])
+
+  if (cargando) return <div className="text-center text-xs text-[#525a68] py-2">Cargando comentarios...</div>
+
+  return (
+    <div className="mt-3 pt-3 border-t border-[#252932]">
+      <span className="text-[10px] font-bold text-[#3b82f6] flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
+      <div className="space-y-2 max-h-40 overflow-y-auto mb-2">
+        {comentarios.map(c => (
+          <div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-[#3b82f6]/10 border-l-2 border-[#3b82f6]' : 'bg-[#1c2028]'}`}>
+            <div className="flex justify-between text-[9px] text-[#525a68] mb-1">
+              <span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Cliente'}</span>
+              <span>{fmtFechaHora(c.created_at)}</span>
+            </div>
+            <p className="text-white/80 text-[11px]">{c.texto}</p>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <textarea rows={1} placeholder="Responder como admin..." className="flex-1 p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-xs resize-none" value={nuevoTexto} onChange={e => setNuevoTexto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentario() } }} />
+        <button onClick={enviarComentario} disabled={enviando} className="px-3 py-1.5 bg-[#3b82f6] rounded text-white text-xs font-bold"><Send size={12}/></button>
+      </div>
+    </div>
+  )
+}
+
+// ---------- MODAL DETALLE SOLICITUD ACOMPAÑAMIENTO (para admin) ----------
+function ModalDetalleSolicitud({ solicitud, proceso, cliente, onClose, onUpdate }: { solicitud: SolicitudAcompanamiento; proceso: Proceso | null; cliente: Cliente | null; onClose: () => void; onUpdate: () => void }) {
+  const [estado, setEstado] = useState(solicitud.estado)
+  const [actualizando, setActualizando] = useState(false)
+
+  async function actualizarEstado(nuevoEstado: string) {
+    setActualizando(true)
+    await supabase.from("solicitudes_acompanamiento").update({ estado: nuevoEstado }).eq("id", solicitud.id)
+    setEstado(nuevoEstado as any)
+    onUpdate()
+    setActualizando(false)
+  }
+
+  async function actualizarEtapa(etapa: number) {
+    const fecha = new Date().toISOString()
+    const updateData: any = { etapa_actual: etapa }
+    updateData[`fecha_etapa_${etapa}`] = fecha
+    await supabase.from("solicitudes_acompanamiento").update(updateData).eq("id", solicitud.id)
+    onUpdate()
+  }
+
+  const dias = diasRestantes(proceso?.fecha_oferta)
+  const urgente = dias !== null && dias <= 3
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="w-[min(800px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
+        <div className="flex justify-between items-center mb-4">
+          <div><h2 className="text-xl font-bold text-white">{proceso?.entidad || solicitud.empresa}</h2><p className="text-xs text-[#3b82f6] font-mono">{solicitud.numero_proceso}</p></div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-[#1c2028] border border-[#252932] text-[#525a68] hover:text-white">✕</button>
+        </div>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div><label className="text-[10px] text-[#525a68]">Presupuesto</label><div className="text-lg font-bold text-[#22c55e]">{fmt(proceso?.presupuesto)}</div></div>
+          <div><label className="text-[10px] text-[#525a68]">Cliente</label><div className="text-sm">{cliente?.nombre || solicitud.cliente_id}</div></div>
+          <div><label className="text-[10px] text-[#525a68]">Estado solicitud</label><div className="flex gap-2">
+            <select value={estado} onChange={e => actualizarEstado(e.target.value)} className="bg-[#1c2028] border border-[#252932] rounded text-xs p-1" disabled={actualizando}>
+              <option value="pendiente">Pendiente</option>
+              <option value="en_proceso">En proceso</option>
+              <option value="atendida">Atendida</option>
+            </select>
+          </div></div>
+          {dias !== null && <div><label className="text-[10px] text-[#525a68]">Cierre</label><div className={`text-sm ${urgente ? "text-red-400" : "text-[#8b919e]"}`}>{dias} días ({fmtFecha(proceso?.fecha_oferta)})</div></div>}
+        </div>
+        <div className="mb-4">
+          <div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-[#3b82f6]">SEGUIMIENTO DE ETAPAS</span><span className="text-[10px] text-[#f59e0b]">{ETAPAS[solicitud.etapa_actual || 0]}</span></div>
+          <TimelineAdmin procesoId={solicitud.id} etapa={solicitud.etapa_actual || 0} onUpdate={(id, etapa) => actualizarEtapa(etapa)} />
+          {solicitud[`fecha_etapa_${solicitud.etapa_actual || 0}`] && (
+            <div className="mt-2 text-[10px] text-[#525a68] flex items-center gap-2"><Calendar size={10}/> Fecha registrada: {fmtFechaHora(solicitud[`fecha_etapa_${solicitud.etapa_actual || 0}`])}</div>
+          )}
+        </div>
+        <div className="mb-4">
+          <label className="text-[10px] text-[#525a68]">Observaciones / Objeto</label>
+          <div className="text-xs text-[#8b919e] bg-[#1c2028] p-2 rounded mt-1 max-h-32 overflow-auto">{proceso?.objeto || solicitud.observaciones || "Sin descripción"}</div>
+        </div>
+        {solicitud.enlace && <a href={solicitud.enlace} target="_blank" className="text-xs text-[#3b82f6] flex items-center gap-1 mb-4">Ver en SECOP ↗</a>}
+        <ComentariosAdmin procesoId={solicitud.proceso_id!} clienteId={solicitud.cliente_id} />
+        <div className="flex justify-end mt-4"><button onClick={onClose} className="px-4 py-2 bg-[#3b82f6] rounded text-white text-sm">Cerrar</button></div>
+      </div>
+    </div>
+  )
+}
+
+// ---------- MODAL NUEVO CLIENTE (igual que antes pero con campos completos) ----------
 function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCreated: (c: Cliente) => void }) {
   const [form, setForm] = useState({
     id: "", nombre: "", usuario: "", password_hash: "",
@@ -99,7 +221,7 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
     departamentos: [] as string[], presupuesto_minimo: "0",
     usar_ia: true, activo: true, email_destinatario: "", drive_url: "",
     codigos_unspc_str: "",
-    restringir_minima: false   // nuevo flag
+    restringir_minima: false
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState("")
@@ -139,9 +261,9 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
   }
 
   return (
-    <Overlay onClose={onClose}>
-      <div className="w-[min(720px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
-        <div className="flex justify-between items-center mb-6"><div><h2 className="text-lg font-bold text-white">Nuevo cliente</h2><p className="text-xs text-[#525a68]">Datos de acceso y configuración IA</p></div><CloseBtn onClose={onClose} /></div>
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="w-[min(720px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
+        <div className="flex justify-between items-center mb-6"><div><h2 className="text-lg font-bold text-white">Nuevo cliente</h2><p className="text-xs text-[#525a68]">Datos de acceso y configuración IA</p></div><button onClick={onClose} className="w-8 h-8 rounded-lg bg-[#1c2028] border border-[#252932] text-[#525a68] hover:text-white">✕</button></div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div><label className="text-[11px] text-[#525a68] block mb-1">ID ÚNICO *</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.id} onChange={e => setForm(f=>({...f,id:e.target.value}))} /></div>
           <div><label className="text-[11px] text-[#525a68] block mb-1">NOMBRE EMPRESA *</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.nombre} onChange={e => setForm(f=>({...f,nombre:e.target.value}))} /></div>
@@ -156,9 +278,7 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
           <div className="col-span-2">
             <div className="flex justify-between items-center mb-1">
               <label className="text-[11px] text-[#525a68]">DEPARTAMENTOS A MONITOREAR</label>
-              <button type="button" onClick={toggleTodosDeptos} className="text-[10px] text-[#3b82f6] hover:underline">
-                {form.departamentos.length === DEPARTAMENTOS_CO.length ? "Deseleccionar todos" : "Seleccionar todos"}
-              </button>
+              <button type="button" onClick={toggleTodosDeptos} className="text-[10px] text-[#3b82f6] hover:underline">{form.departamentos.length === DEPARTAMENTOS_CO.length ? "Deseleccionar todos" : "Seleccionar todos"}</button>
             </div>
             <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-[#252932] rounded bg-[#1c2028]">
               {DEPARTAMENTOS_CO.map(d => (
@@ -173,22 +293,16 @@ function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCrea
           </div>
           <div className="col-span-2">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.restringir_minima}
-                onChange={e => setForm(f => ({ ...f, restringir_minima: e.target.checked }))}
-                className="w-4 h-4 accent-[#3b82f6]"
-              />
+              <input type="checkbox" checked={form.restringir_minima} onChange={e => setForm(f => ({ ...f, restringir_minima: e.target.checked }))} className="w-4 h-4 accent-[#3b82f6]" />
               <span className="text-[11px] text-[#525a68]">Restringir solo a procesos de Mínima Cuantía (para empresas pequeñas sin RUP)</span>
             </label>
-            <p className="text-[10px] text-[#525a68] mt-1">Si activas esta opción, el cliente solo verá procesos con modalidad "Mínima Cuantía".</p>
           </div>
           <div className="flex gap-4"><label className="flex items-center gap-2"><input type="checkbox" checked={form.usar_ia} onChange={e=>setForm(f=>({...f,usar_ia:e.target.checked}))} /><span className="text-xs">Usar IA</span></label><label className="flex items-center gap-2"><input type="checkbox" checked={form.activo} onChange={e=>setForm(f=>({...f,activo:e.target.checked}))} /><span className="text-xs">Activo al crear</span></label></div>
         </div>
         {err && <p className="text-red-500 text-xs mt-2">{err}</p>}
         <div className="flex gap-2 mt-6"><button onClick={onClose} className="flex-1 py-2 bg-transparent border border-[#252932] rounded text-[#525a68]">Cancelar</button><button onClick={guardar} disabled={saving} className="flex-2 py-2 bg-[#3b82f6] rounded text-white font-bold">{saving ? "Creando..." : "Crear cliente"}</button></div>
       </div>
-    </Overlay>
+    </div>
   )
 }
 
@@ -234,9 +348,9 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
     onClose()
   }
   return (
-    <Overlay onClose={onClose}>
-      <div className="w-[min(720px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
-        <div className="flex justify-between items-center mb-6"><div><h2 className="text-lg font-bold text-white">Editar cliente</h2><p className="text-xs text-[#3b82f6]">{cliente.id}</p></div><CloseBtn onClose={onClose} /></div>
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="w-[min(720px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
+        <div className="flex justify-between items-center mb-6"><div><h2 className="text-lg font-bold text-white">Editar cliente</h2><p className="text-xs text-[#3b82f6]">{cliente.id}</p></div><button onClick={onClose} className="w-8 h-8 rounded-lg bg-[#1c2028] border border-[#252932] text-[#525a68] hover:text-white">✕</button></div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div><label className="text-[11px] text-[#525a68]">NOMBRE EMPRESA</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.nombre} onChange={e=>setForm(f=>({...f,nombre:e.target.value}))} /></div>
           <div><label className="text-[11px] text-[#525a68]">USUARIO</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.usuario} onChange={e=>setForm(f=>({...f,usuario:e.target.value}))} /></div>
@@ -250,9 +364,7 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
           <div className="col-span-2">
             <div className="flex justify-between items-center mb-1">
               <label className="text-[11px] text-[#525a68]">DEPARTAMENTOS</label>
-              <button type="button" onClick={toggleTodosDeptos} className="text-[10px] text-[#3b82f6] hover:underline">
-                {form.departamentos.length === DEPARTAMENTOS_CO.length ? "Deseleccionar todos" : "Seleccionar todos"}
-              </button>
+              <button type="button" onClick={toggleTodosDeptos} className="text-[10px] text-[#3b82f6] hover:underline">{form.departamentos.length === DEPARTAMENTOS_CO.length ? "Deseleccionar todos" : "Seleccionar todos"}</button>
             </div>
             <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-[#252932] rounded bg-[#1c2028]">
               {DEPARTAMENTOS_CO.map(d => <button key={d} type="button" onClick={()=>toggleDepto(d)} className={`text-xs px-2 py-1 rounded-full border ${form.departamentos.includes(d) ? "border-[#3b82f6] bg-[#1e3a8a22] text-[#60a5fa]" : "border-[#252932] text-[#525a68]"}`}>{d}</button>)}
@@ -265,12 +377,7 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
           </div>
           <div className="col-span-2">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.restringir_minima}
-                onChange={e => setForm(f => ({ ...f, restringir_minima: e.target.checked }))}
-                className="w-4 h-4 accent-[#3b82f6]"
-              />
+              <input type="checkbox" checked={form.restringir_minima} onChange={e => setForm(f => ({ ...f, restringir_minima: e.target.checked }))} className="w-4 h-4 accent-[#3b82f6]" />
               <span className="text-[11px] text-[#525a68]">Restringir solo a procesos de Mínima Cuantía</span>
             </label>
           </div>
@@ -279,11 +386,11 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
         {err && <p className="text-red-500 text-xs mt-2">{err}</p>}
         <div className="flex gap-2 mt-6"><button onClick={onClose} className="flex-1 py-2 bg-transparent border border-[#252932] rounded text-[#525a68]">Cancelar</button><button onClick={guardar} disabled={saving} className="flex-2 py-2 bg-[#3b82f6] rounded text-white font-bold">{saving ? "Guardando..." : "Guardar cambios"}</button></div>
       </div>
-    </Overlay>
+    </div>
   )
 }
 
-// ---------- MODAL PROCESO MANUAL (sin cambios relevantes) ----------
+// ---------- MODAL PROCESO MANUAL ----------
 function ModalProcesoManual({ clientes, onClose, onCreated }: { clientes: Cliente[]; onClose: () => void; onCreated: (p: Proceso) => void }) {
   const [form, setForm] = useState({
     cliente_id: clientes[0]?.id || "", referencia: "", entidad: "", departamento: "", ciudad: "",
@@ -308,9 +415,9 @@ function ModalProcesoManual({ clientes, onClose, onCreated }: { clientes: Client
     onClose()
   }
   return (
-    <Overlay onClose={onClose}>
-      <div className="w-[min(680px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
-        <div className="flex justify-between"><h2 className="text-lg font-bold text-white">Agregar proceso manual</h2><CloseBtn onClose={onClose} /></div>
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="w-[min(680px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
+        <div className="flex justify-between"><h2 className="text-lg font-bold text-white">Agregar proceso manual</h2><button onClick={onClose} className="w-8 h-8 rounded-lg bg-[#1c2028] border border-[#252932] text-[#525a68] hover:text-white">✕</button></div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <div className="col-span-2"><label className="text-xs text-[#525a68]">CLIENTE *</label><select className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.cliente_id} onChange={e=>setForm(f=>({...f,cliente_id:e.target.value}))}>{clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}</select></div>
           <div><label className="text-xs text-[#525a68]">REFERENCIA *</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.referencia} onChange={e=>setForm(f=>({...f,referencia:e.target.value}))} /></div>
@@ -328,21 +435,21 @@ function ModalProcesoManual({ clientes, onClose, onCreated }: { clientes: Client
         {err && <p className="text-red-500 text-xs mt-2">{err}</p>}
         <div className="flex gap-2 mt-6"><button onClick={onClose} className="flex-1 py-2 bg-transparent border border-[#252932] rounded text-[#525a68]">Cancelar</button><button onClick={guardar} disabled={saving} className="flex-2 py-2 bg-[#22c55e] rounded text-white font-bold">{saving ? "Guardando..." : "Agregar proceso"}</button></div>
       </div>
-    </Overlay>
+    </div>
   )
 }
 
 // ---------- MODAL ELIMINAR ----------
 function ModalEliminar({ nombre, onClose, onConfirm, loading }: { nombre: string; onClose: () => void; onConfirm: () => void; loading: boolean }) {
   return (
-    <Overlay onClose={onClose}>
-      <div className="w-[400px] bg-[#111318] border border-[#252932] rounded-2xl p-6 text-center">
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="w-[400px] bg-[#111318] border border-[#252932] rounded-2xl p-6 text-center">
         <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center mx-auto mb-4 text-2xl">⚠️</div>
         <h3 className="text-lg font-bold text-white mb-2">Eliminar cliente</h3>
         <p className="text-sm text-[#8b919e] mb-4">¿Confirmas eliminar <strong>{nombre}</strong>? Se borrarán también sus procesos y feedback. <span className="text-red-500">No reversible.</span></p>
         <div className="flex gap-3"><button onClick={onClose} className="flex-1 py-2 bg-transparent border border-[#252932] rounded text-[#525a68]">Cancelar</button><button onClick={onConfirm} disabled={loading} className="flex-1 py-2 bg-red-600 rounded text-white font-bold">{loading ? "Eliminando..." : "Sí, eliminar"}</button></div>
       </div>
-    </Overlay>
+    </div>
   )
 }
 
@@ -355,6 +462,7 @@ export default function AdminPage() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [procesos, setProcesos] = useState<Proceso[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
+  const [solicitudes, setSolicitudes] = useState<SolicitudAcompanamiento[]>([])
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState("")
   const [clienteSel, setClienteSel] = useState<string | null>(null)
@@ -371,11 +479,13 @@ export default function AdminPage() {
   const [eliminarCliente, setEliminarCliente] = useState<Cliente | null>(null)
   const [elimLoading, setElimLoading] = useState(false)
   const [showNuevoProceso, setShowNuevoProceso] = useState(false)
-  const [notificaciones, setNotificaciones] = useState<Feedback[]>([])
+  const [notificaciones, setNotificaciones] = useState<{ id: string; mensaje: string; fecha: string; leido: boolean }[]>([])
   const [mostrarNotis, setMostrarNotis] = useState(false)
+  const [solicitudSeleccionada, setSolicitudSeleccionada] = useState<SolicitudAcompanamiento | null>(null)
+  const [mostrarSoloAcompanamiento, setMostrarSoloAcompanamiento] = useState(false)
 
   useEffect(() => {
-   if (sessionStorage.getItem("secop_admin") === btoa(ADMIN_PASS)) { setAuthed(true); cargar() }
+    if (sessionStorage.getItem("secop_admin") === btoa(ADMIN_PASS)) { setAuthed(true); cargar() }
     else setLoading(false)
   }, [])
 
@@ -386,18 +496,34 @@ export default function AdminPage() {
 
   async function cargar() {
     setLoading(true)
-    const [{ data: c }, { data: p }, { data: f }] = await Promise.all([
+    const [{ data: c }, { data: p }, { data: f }, { data: s }] = await Promise.all([
       supabase.from("clientes").select("*").order("nombre"),
       supabase.from("procesos").select("*").order("updated_at", { ascending: false }),
       supabase.from("feedback").select("*").order("created_at", { ascending: false }),
+      supabase.from("solicitudes_acompanamiento").select("*").order("created_at", { ascending: false })
     ])
     setClientes(c || [])
     setProcesos(p || [])
     setFeedback(f || [])
-    const hoy = new Date()
-    const ayer = new Date(hoy.getTime() - 24*60*60*1000)
-    const nuevosFeed = (f || []).filter(fb => new Date(fb.created_at) > ayer && (fb.accion === "interesado" || fb.accion === "enviado_sofia"))
-    setNotificaciones(nuevosFeed)
+    setSolicitudes(s || [])
+
+    // Notificaciones: comentarios nuevos del admin (últimos 7 días)
+    const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 7)
+    const { data: comentariosRecientes } = await supabase
+      .from("comentarios")
+      .select("*, procesos!inner(referencia)")
+      .eq("autor", "cliente")
+      .gte("created_at", fechaLimite.toISOString())
+      .order("created_at", { ascending: false })
+      .limit(10)
+
+    const notis = (comentariosRecientes || []).map(c => ({
+      id: c.id,
+      mensaje: `Nuevo comentario de cliente en ${(c as any).procesos?.referencia || "proceso"}: "${c.texto.substring(0, 50)}${c.texto.length > 50 ? "..." : ""}"`,
+      fecha: c.created_at,
+      leido: false
+    }))
+    setNotificaciones(notis)
     setLoading(false)
   }
 
@@ -449,16 +575,18 @@ export default function AdminPage() {
     mostrarToast(`Etapa actualizada: ${ETAPAS[etapa]}`)
   }
 
-  const clientesFilt = clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()) || c.id.toLowerCase().includes(busqueda.toLowerCase()))
+  // Filtrar procesos
   const procesosFilt = procesos.filter(p => {
     if (clienteSel && p.cliente_id !== clienteSel) return false
     if (estadoSel !== "todos" && p.estado !== estadoSel) return false
     if (busqueda && !p.entidad?.toLowerCase().includes(busqueda.toLowerCase()) && !p.referencia.toLowerCase().includes(busqueda.toLowerCase()) && !p.objeto?.toLowerCase().includes(busqueda.toLowerCase())) return false
     return true
   })
-  const interesados = procesosFilt.filter(p => p.estado === "interesado")
-  const nuevos = procesosFilt.filter(p => p.estado === "nuevo")
-  const descartados = procesosFilt.filter(p => p.estado === "descartado")
+
+  // Procesos en acompañamiento (los que tienen en_acompanamiento = true)
+  const procesosAcompanamiento = procesos.filter(p => p.en_acompanamiento === true)
+
+  // Estadísticas
   const activos = clientes.filter(c => c.activo).length
   const presTotalInteres = procesos.filter(p => p.estado === "interesado").reduce((s,p) => s + Number(p.presupuesto || 0), 0)
 
@@ -507,7 +635,7 @@ export default function AdminPage() {
           <div className="flex items-center gap-4">
             <div className="relative">
               <button onClick={()=>setMostrarNotis(!mostrarNotis)} className="relative p-1.5 rounded-lg bg-[#1c2028] border border-[#252932] text-[#8b919e] hover:text-white transition-all"><Bell size={16} />{notificaciones.length>0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] flex items-center justify-center">{notificaciones.length}</span>}</button>
-              {mostrarNotis && <div className="absolute right-0 mt-2 w-80 bg-[#111318] border border-[#252932] rounded-xl shadow-xl z-50 p-2"><div className="text-xs font-bold text-[#525a68] p-2 border-b border-[#252932]">Actividad reciente</div>{notificaciones.length===0?<p className="text-xs text-[#525a68] p-3">Sin novedades</p>:notificaciones.map(n=>{const proc=procesos.find(p=>p.id===n.proceso_id);return <div key={n.id} className="text-xs p-2 border-b border-[#252932]"><span className="text-[#60a5fa]">{n.accion==="interesado"?"⭐ Interés":"📤 Enviado a SOFIA"}</span><div className="text-[#8b919e]">{proc?.entidad || proc?.referencia}</div><div className="text-[10px] text-[#525a68]">{new Date(n.created_at).toLocaleString()}</div></div>})}</div>}
+              {mostrarNotis && <div className="absolute right-0 mt-2 w-80 bg-[#111318] border border-[#252932] rounded-xl shadow-xl z-50 p-2"><div className="text-xs font-bold text-[#525a68] p-2 border-b border-[#252932]">Actividad reciente</div>{notificaciones.length===0?<p className="text-xs text-[#525a68] p-3">Sin novedades</p>:notificaciones.map(n=> <div key={n.id} className="text-xs p-2 border-b border-[#252932]"><span className="text-[#60a5fa]">💬 Nuevo comentario</span><div className="text-[#8b919e]">{n.mensaje}</div><div className="text-[10px] text-[#525a68]">{fmtFechaHora(n.fecha)}</div></div>)}</div>}
             </div>
             <button onClick={()=>router.push("/dashboard")} className="text-xs px-3 py-1 bg-transparent border border-[#252932] rounded">Dashboard</button>
             <button onClick={()=>{sessionStorage.removeItem("secop_admin");router.push("/login")}} className="text-xs px-3 py-1 bg-transparent border border-[#252932] rounded">Salir</button>
@@ -522,8 +650,8 @@ export default function AdminPage() {
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Total procesos</div><div className="text-2xl font-bold text-[#22c55e]">{procesos.length}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Interesados</div><div className="text-2xl font-bold text-[#f59e0b]">{procesos.filter(p=>p.estado==="interesado").length}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Presupuesto interesado</div><div className="text-sm font-bold text-[#34d399]">{fmt(presTotalInteres)}</div></div>
-          <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Feedback hoy</div><div className="text-2xl font-bold text-[#f472b6]">{feedback.filter(f=>f.created_at?.startsWith(new Date().toISOString().slice(0,10))).length}</div></div>
-          <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Manuales</div><div className="text-2xl font-bold text-[#a78bfa]">{procesos.filter(p=>p.es_manual).length}</div></div>
+          <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">En acompañamiento</div><div className="text-2xl font-bold text-[#a78bfa]">{procesosAcompanamiento.length}</div></div>
+          <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Solicitudes pendientes</div><div className="text-2xl font-bold text-[#f472b6]">{solicitudes.filter(s=>s.estado==="pendiente").length}</div></div>
         </div>
 
         {/* Gráficos */}
@@ -540,12 +668,15 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Filtros */}
+        {/* Filtros y tabs */}
         <div className="flex flex-wrap gap-3 items-center justify-between mb-4">
           <div className="flex gap-2">
             <select value={clienteSel || ""} onChange={e=>setClienteSel(e.target.value||null)} className="bg-[#15181f] border border-[#252932] rounded-lg p-2 text-sm"><option value="">Todos los clientes</option>{clientes.map(c=><option key={c.id} value={c.id}>{c.nombre} {!c.activo?"(inactivo)":""}</option>)}</select>
             <select value={estadoSel} onChange={e=>setEstadoSel(e.target.value)} className="bg-[#15181f] border border-[#252932] rounded-lg p-2 text-sm"><option value="todos">Todos los estados</option><option value="nuevo">Nuevos</option><option value="interesado">Interesados</option><option value="descartado">Descartados</option></select>
             <input type="text" placeholder="Buscar..." value={busqueda} onChange={e=>setBusqueda(e.target.value)} className="bg-[#15181f] border border-[#252932] rounded-lg p-2 text-sm w-48" />
+            <button onClick={()=>setMostrarSoloAcompanamiento(!mostrarSoloAcompanamiento)} className={`text-xs px-3 py-1.5 rounded ${mostrarSoloAcompanamiento ? "bg-[#a78bfa] text-white" : "bg-[#1c2028] text-[#8b919e]"} border border-[#252932]`}>
+              {mostrarSoloAcompanamiento ? "Mostrar todos" : "Ver solo acompañamiento"}
+            </button>
           </div>
           <div className="flex gap-2">
             <button onClick={()=>setShowNuevoProceso(true)} className="text-xs px-3 py-1.5 bg-[#22c55e]/20 border border-[#22c55e]/40 rounded text-[#22c55e]">+ Proceso manual</button>
@@ -554,23 +685,30 @@ export default function AdminPage() {
         </div>
 
         <div className="flex gap-2 border-b border-[#252932] mb-4">
-          {["procesos","clientes","feedback"].map(t=> <button key={t} onClick={()=>setTab(t)} className={`px-4 py-2 text-sm font-medium ${tab===t ? "text-[#3b82f6] border-b-2 border-[#3b82f6]" : "text-[#8b919e]"}`}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
+          {["procesos","clientes","feedback","acompanamiento"].map(t=> <button key={t} onClick={()=>setTab(t)} className={`px-4 py-2 text-sm font-medium ${tab===t ? "text-[#3b82f6] border-b-2 border-[#3b82f6]" : "text-[#8b919e]"}`}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
         </div>
 
         {/* TAB PROCESOS */}
         {tab === "procesos" && (
           <div className="space-y-4">
-            <div className="text-xs text-[#8b919e] flex gap-4"><span>Interesados: {interesados.length}</span><span>Nuevos: {nuevos.length}</span><span>Descartados: {descartados.length}</span></div>
-            {procesosFilt.length === 0 ? <div className="text-center py-12 text-[#525a68]">No hay procesos con esos filtros</div> : procesosFilt.map(p=>{
+            <div className="text-xs text-[#8b919e] flex gap-4"><span>Interesados: {procesosFilt.filter(p=>p.estado==="interesado").length}</span><span>Nuevos: {procesosFilt.filter(p=>p.estado==="nuevo").length}</span><span>Descartados: {procesosFilt.filter(p=>p.estado==="descartado").length}</span></div>
+            {procesosFilt.filter(p => !mostrarSoloAcompanamiento || p.en_acompanamiento).length === 0 ? <div className="text-center py-12 text-[#525a68]">No hay procesos con esos filtros</div> : procesosFilt.filter(p => !mostrarSoloAcompanamiento || p.en_acompanamiento).map(p=>{
               const cliente = clientes.find(c=>c.id===p.cliente_id)
               const dias = diasRestantes(p.fecha_oferta)
               const urgente = dias !== null && dias <=3
               const isInt = p.estado === "interesado"
+              const isAcompanamiento = p.en_acompanamiento === true
               return (
-                <div key={p.id} className="bg-[#15181f] border border-[#252932] rounded-xl p-4 hover:border-[#3b82f6]/40 transition-all">
+                <div key={p.id} className={`bg-[#15181f] border rounded-xl p-4 hover:border-[#3b82f6]/40 transition-all ${isAcompanamiento ? "border-[#a78bfa]/40 bg-[#15181f]" : "border-[#252932]"}`}>
                   <div className="flex flex-wrap justify-between gap-2">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap mb-1"><span className="text-[10px] bg-[#1e3a8a22] text-[#60a5fa] px-2 py-0.5 rounded-full">{cliente?.nombre || p.cliente_id}</span>{p.es_manual && <span className="text-[9px] text-[#a78bfa] bg-[#a78bfa22] px-2 rounded">MANUAL</span>}{urgente && <span className="text-[10px] text-red-400">⚠ {dias}d</span>}<span className={`text-[10px] px-2 rounded-full ${p.estado==='interesado'?'bg-[#f59e0b22] text-[#f59e0b]':p.estado==='descartado'?'bg-red-500/20 text-red-400':'bg-[#3b82f6]/20 text-[#3b82f6]'}`}>{p.estado}</span></div>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="text-[10px] bg-[#1e3a8a22] text-[#60a5fa] px-2 py-0.5 rounded-full">{cliente?.nombre || p.cliente_id}</span>
+                        {p.es_manual && <span className="text-[9px] text-[#a78bfa] bg-[#a78bfa22] px-2 rounded">MANUAL</span>}
+                        {urgente && <span className="text-[10px] text-red-400">⚠ {dias}d</span>}
+                        {isAcompanamiento && <span className="text-[10px] bg-[#a78bfa22] text-[#a78bfa] px-2 rounded">Acompañamiento</span>}
+                        <span className={`text-[10px] px-2 rounded-full ${p.estado==='interesado'?'bg-[#f59e0b22] text-[#f59e0b]':p.estado==='descartado'?'bg-red-500/20 text-red-400':'bg-[#3b82f6]/20 text-[#3b82f6]'}`}>{p.estado}</span>
+                      </div>
                       <div className="font-semibold text-white">{p.entidad || "—"}</div>
                       <div className="text-[10px] text-[#525a68] font-mono">{p.referencia}</div>
                       <p className="text-xs text-[#8b919e] mt-2 line-clamp-2">{p.objeto || ""}</p>
@@ -581,17 +719,24 @@ export default function AdminPage() {
                       <div className="text-[10px] text-[#525a68]">Cierre {fmtFecha(p.fecha_oferta)}</div>
                     </div>
                   </div>
-                  {isInt && (
+                  {isInt && !isAcompanamiento && (
                     <div className="mt-3 pt-3 border-t border-[#252932]">
                       <div className="flex justify-between items-center mb-1"><span className="text-[10px] font-bold text-[#3b82f6]">SEGUIMIENTO</span><span className="text-[10px] text-[#f59e0b]">{ETAPAS[p.etapa_seguimiento ?? 0]}</span></div>
                       <TimelineAdmin procesoId={p.id} etapa={p.etapa_seguimiento ?? 0} onUpdate={actualizarEtapa} />
                     </div>
                   )}
+                  {isAcompanamiento && (
+                    <div className="mt-3 pt-3 border-t border-[#252932]">
+                      <div className="flex justify-between items-center mb-1"><span className="text-[10px] font-bold text-[#a78bfa]">ACOMPAÑAMIENTO</span><span className="text-[10px] text-[#f59e0b]">{ETAPAS[p.etapa_seguimiento ?? 0]}</span></div>
+                      <TimelineAdmin procesoId={p.id} etapa={p.etapa_seguimiento ?? 0} onUpdate={actualizarEtapa} />
+                      <ComentariosAdmin procesoId={p.id} clienteId={p.cliente_id} />
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-2 justify-between items-center mt-3 pt-2 border-t border-[#252932]">
                     <div className="flex gap-2">
-                      {p.estado !== "interesado" && <button onClick={()=>cambiarEstadoProceso(p.id, "interesado")} className="text-xs bg-[#f59e0b22] text-[#f59e0b] px-2 py-1 rounded">Marcar Interés</button>}
-                      {p.estado !== "descartado" && <button onClick={()=>cambiarEstadoProceso(p.id, "descartado")} className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">Descartar</button>}
-                      {p.estado !== "nuevo" && <button onClick={()=>cambiarEstadoProceso(p.id, "nuevo")} className="text-xs bg-[#3b82f6]/20 text-[#3b82f6] px-2 py-1 rounded">Restaurar</button>}
+                      {!isAcompanamiento && p.estado !== "interesado" && <button onClick={()=>cambiarEstadoProceso(p.id, "interesado")} className="text-xs bg-[#f59e0b22] text-[#f59e0b] px-2 py-1 rounded">Marcar Interés</button>}
+                      {!isAcompanamiento && p.estado !== "descartado" && <button onClick={()=>cambiarEstadoProceso(p.id, "descartado")} className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">Descartar</button>}
+                      {!isAcompanamiento && p.estado !== "nuevo" && <button onClick={()=>cambiarEstadoProceso(p.id, "nuevo")} className="text-xs bg-[#3b82f6]/20 text-[#3b82f6] px-2 py-1 rounded">Restaurar</button>}
                       {editDriveProceso === p.id ? (
                         <div className="flex gap-1"><input type="text" placeholder="Drive URL" value={driveProcUrl} onChange={e=>setDriveProcUrl(e.target.value)} className="text-xs p-1 bg-[#0a0c10] rounded w-48"/><button onClick={guardarDriveProceso} className="text-xs bg-[#22c55e] px-2 py-1 rounded">✓</button><button onClick={()=>setEditDriveProceso(null)} className="text-xs bg-[#252932] px-2 py-1 rounded">✕</button></div>
                       ) : (<><button onClick={()=>{setEditDriveProceso(p.id); setDriveProcUrl(p.drive_proceso_url||"")}} className="text-xs bg-[#1c2028] px-2 py-1 rounded">📁 Drive</button></>)}
@@ -608,7 +753,7 @@ export default function AdminPage() {
         {/* TAB CLIENTES */}
         {tab === "clientes" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {clientesFilt.map(c=>(
+            {clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()) || c.id.toLowerCase().includes(busqueda.toLowerCase())).map(c=>(
               <div key={c.id} className="bg-[#15181f] border border-[#252932] rounded-xl p-4">
                 <div className="flex justify-between"><div className="flex gap-3 items-center"><div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#1e3a8a] to-[#3b82f6] flex items-center justify-center font-bold">{initials(c.nombre)}</div><div><div className="font-bold">{c.nombre}</div><div className="text-[10px] text-[#3b82f6]">{c.id}</div>{c.usuario && <div className="text-[9px] text-[#525a68]">@{c.usuario}</div>}</div></div><button onClick={()=>toggleActivo(c)} className={`text-[10px] px-2 py-0.5 rounded-full ${c.activo ? "bg-[#22c55e22] text-[#22c55e]" : "bg-red-500/20 text-red-400"}`}>{c.activo ? "Activo" : "Inactivo"}</button></div>
                 <p className="text-xs text-[#8b919e] mt-2 line-clamp-2">{c.descripcion_negocio}</p>
@@ -629,11 +774,7 @@ export default function AdminPage() {
           <div className="bg-[#15181f] border border-[#252932] rounded-xl overflow-auto">
             <table className="w-full text-sm">
               <thead className="border-b border-[#252932]">
-                <tr>
-                  {["Cliente","Proceso","Acción","Nota","Fecha"].map(h => (
-                    <th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>
-                  ))}
-                </tr>
+                <tr><th className="p-2 text-left text-[10px] text-[#525a68]">Cliente</th><th className="p-2 text-left text-[10px] text-[#525a68]">Proceso</th><th className="p-2 text-left text-[10px] text-[#525a68]">Acción</th><th className="p-2 text-left text-[10px] text-[#525a68]">Nota</th><th className="p-2 text-left text-[10px] text-[#525a68]">Fecha</th></tr>
               </thead>
               <tbody>
                 {feedback.slice(0,100).map(f => {
@@ -642,11 +783,7 @@ export default function AdminPage() {
                     <tr key={f.id} className="border-b border-[#1c2028]">
                       <td className="p-2 text-[11px] text-[#60a5fa]">{f.cliente_id || "—"}</td>
                       <td className="p-2 text-[10px] max-w-40 truncate">{proc?.entidad || f.proceso_id}</td>
-                      <td className="p-2">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>
-                          {f.accion}
-                        </span>
-                      </td>
+                      <td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>{f.accion}</span></td>
                       <td className="p-2 text-[11px]">{f.nota || "—"}</td>
                       <td className="p-2 text-[10px] text-[#525a68]">{new Date(f.created_at).toLocaleDateString()}</td>
                     </tr>
@@ -656,6 +793,38 @@ export default function AdminPage() {
             </table>
           </div>
         )}
+
+        {/* TAB ACOMPAÑAMIENTO (solicitudes) */}
+        {tab === "acompanamiento" && (
+          <div className="space-y-4">
+            <div className="text-xs text-[#8b919e] flex gap-4"><span>Pendientes: {solicitudes.filter(s=>s.estado==="pendiente").length}</span><span>En proceso: {solicitudes.filter(s=>s.estado==="en_proceso").length}</span><span>Atendidas: {solicitudes.filter(s=>s.estado==="atendida").length}</span></div>
+            {solicitudes.length === 0 ? <div className="text-center py-12 text-[#525a68]">No hay solicitudes de acompañamiento</div> : solicitudes.map(sol => {
+              const proceso = procesos.find(p => p.id === sol.proceso_id)
+              const cliente = clientes.find(c => c.id === sol.cliente_id)
+              const dias = diasRestantes(proceso?.fecha_oferta)
+              const urgente = dias !== null && dias <= 3
+              return (
+                <div key={sol.id} className="bg-[#15181f] border border-[#252932] rounded-xl p-4 hover:border-[#a78bfa]/40 cursor-pointer transition-all" onClick={() => setSolicitudSeleccionada(sol)}>
+                  <div className="flex justify-between items-start">
+                    <div><div className="font-semibold text-white">{proceso?.entidad || sol.empresa}</div><div className="text-[10px] text-[#a78bfa] font-mono">{sol.numero_proceso}</div></div>
+                    <div className="flex gap-2">
+                      <div className={`text-[10px] px-2 py-0.5 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-500/20 text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'}`}>{sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}</div>
+                      <div className="text-[11px] font-mono text-[#22c55e]">{fmt(proceso?.presupuesto)}</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-[#525a68]">
+                    <span><Calendar size={10} className="inline mr-1"/>Solicitado: {fmtFechaHora(sol.created_at)}</span>
+                    {urgente && <span className="text-red-400">⚠ Cierra en {dias}d</span>}
+                  </div>
+                  <div className="mt-2 text-xs text-[#8b919e] line-clamp-2">{proceso?.objeto || sol.observaciones}</div>
+                  <div className="mt-3 flex justify-end">
+                    <button onClick={(e) => { e.stopPropagation(); setSolicitudSeleccionada(sol) }} className="text-xs bg-[#3b82f6]/20 text-[#3b82f6] px-2 py-1 rounded">Ver detalles</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {toast && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-[#1c2028] border border-[#252932] text-white px-4 py-2 rounded-lg text-sm z-[100]">{toast}</div>}
@@ -663,6 +832,11 @@ export default function AdminPage() {
       {editarCliente && <ModalEditarCliente cliente={editarCliente} onClose={()=>setEditarCliente(null)} onUpdated={c=>{setClientes(prev=>prev.map(x=>x.id===c.id?c:x));mostrarToast("Cliente actualizado.")}} />}
       {eliminarCliente && <ModalEliminar nombre={eliminarCliente.nombre} loading={elimLoading} onClose={()=>setEliminarCliente(null)} onConfirm={confirmarEliminar} />}
       {showNuevoProceso && <ModalProcesoManual clientes={clientes.filter(c=>c.activo)} onClose={()=>setShowNuevoProceso(false)} onCreated={p=>{setProcesos(prev=>[p,...prev]);mostrarToast("Proceso manual agregado.")}} />}
+      {solicitudSeleccionada && (() => {
+        const proceso = procesos.find(p => p.id === solicitudSeleccionada.proceso_id)
+        const cliente = clientes.find(c => c.id === solicitudSeleccionada.cliente_id)
+        return <ModalDetalleSolicitud solicitud={solicitudSeleccionada} proceso={proceso || null} cliente={cliente || null} onClose={() => setSolicitudSeleccionada(null)} onUpdate={() => cargar()} />
+      })()}
     </div>
   )
 }
