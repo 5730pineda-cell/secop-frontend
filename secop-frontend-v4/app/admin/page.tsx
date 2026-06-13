@@ -204,8 +204,229 @@ function ModalResultado({ proceso, onClose, onUpdate }: { proceso: Proceso; onCl
   )
 }
 
-// ---------- MODALES CLIENTE Y PROCESO MANUAL (sin cambios relevantes, se mantienen) ----------
-// ... (los modales existentes se mantienen igual para no alargar el mensaje, pero se incluyen en el código final)
+// ---------- MODALES PARA CLIENTES Y PROCESOS (tomados de tu código anterior) ----------
+function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCreated: (c: Cliente) => void }) {
+  const [form, setForm] = useState({
+    id: "", nombre: "", usuario: "", password_hash: "",
+    descripcion_negocio: "", palabras_clave: "", palabras_excluidas: "",
+    departamentos: [] as string[], presupuesto_minimo: "0",
+    usar_ia: true, activo: true, email_destinatario: "", drive_url: "",
+    codigos_unspc_str: "",
+    restringir_minima: false
+  })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState("")
+
+  function toggleDepto(d: string) {
+    setForm(f => ({ ...f, departamentos: f.departamentos.includes(d) ? f.departamentos.filter(x => x !== d) : [...f.departamentos, d] }))
+  }
+  function toggleTodosDeptos() {
+    setForm(f => ({ ...f, departamentos: f.departamentos.length === DEPARTAMENTOS_CO.length ? [] : [...DEPARTAMENTOS_CO] }))
+  }
+
+  async function guardar() {
+    if (!form.id.trim() || !form.nombre.trim()) { setErr("ID y Nombre son obligatorios."); return }
+    setSaving(true); setErr("")
+    const codigosArray = form.codigos_unspc_str.split(",").map(c => c.trim()).filter(Boolean)
+    const modalidadesArray = form.restringir_minima ? ["Mínima Cuantía"] : null
+    const { data, error } = await supabase.from("clientes").insert([{
+      id: form.id.trim().toLowerCase().replace(/\s+/g, "_"),
+      nombre: form.nombre.trim(),
+      usuario: form.usuario.trim() || null,
+      password_hash: form.password_hash.trim() || null,
+      descripcion_negocio: form.descripcion_negocio.trim(),
+      palabras_clave: form.palabras_clave.split(",").map(x => x.trim()).filter(Boolean),
+      palabras_excluidas: form.palabras_excluidas.split(",").map(x => x.trim()).filter(Boolean),
+      departamentos: form.departamentos,
+      presupuesto_minimo: Number(form.presupuesto_minimo) || 0,
+      usar_ia: form.usar_ia, activo: form.activo,
+      email_destinatario: form.email_destinatario.trim() || null,
+      drive_url: form.drive_url.trim() || null,
+      codigos_unspc: codigosArray,
+      modalidades_permitidas: modalidadesArray,
+    }]).select().single()
+    setSaving(false)
+    if (error) { setErr(error.message); return }
+    onCreated(data as Cliente)
+    onClose()
+  }
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="w-[min(720px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
+        <div className="flex justify-between items-center mb-6"><div><h2 className="text-lg font-bold text-white">Nuevo cliente</h2><p className="text-xs text-[#525a68]">Datos de acceso y configuración IA</p></div><CloseBtn onClose={onClose} /></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div><label className="text-[11px] text-[#525a68] block mb-1">ID ÚNICO *</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.id} onChange={e => setForm(f=>({...f,id:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68] block mb-1">NOMBRE EMPRESA *</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.nombre} onChange={e => setForm(f=>({...f,nombre:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68] block mb-1">USUARIO (login)</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.usuario} onChange={e => setForm(f=>({...f,usuario:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68] block mb-1">CONTRASEÑA</label><input type="password" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.password_hash} onChange={e => setForm(f=>({...f,password_hash:e.target.value}))} /></div>
+          <div className="col-span-2"><label className="text-[11px] text-[#525a68] block mb-1">DESCRIPCIÓN DEL NEGOCIO</label><textarea rows={2} className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.descripcion_negocio} onChange={e => setForm(f=>({...f,descripcion_negocio:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68] block mb-1">PALABRAS CLAVE (coma)</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" placeholder="infraestructura, obra civil" value={form.palabras_clave} onChange={e => setForm(f=>({...f,palabras_clave:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68] block mb-1">PALABRAS EXCLUIDAS</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" placeholder="seguridad, limpieza" value={form.palabras_excluidas} onChange={e => setForm(f=>({...f,palabras_excluidas:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68] block mb-1">PRESUPUESTO MÍNIMO (COP)</label><input type="number" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.presupuesto_minimo} onChange={e => setForm(f=>({...f,presupuesto_minimo:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68] block mb-1">EMAIL NOTIFICACIONES</label><input type="email" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.email_destinatario} onChange={e => setForm(f=>({...f,email_destinatario:e.target.value}))} /></div>
+          <div className="col-span-2"><label className="text-[11px] text-[#525a68] block mb-1">GOOGLE DRIVE URL</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.drive_url} onChange={e => setForm(f=>({...f,drive_url:e.target.value}))} /></div>
+          <div className="col-span-2">
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] text-[#525a68]">DEPARTAMENTOS A MONITOREAR</label>
+              <button type="button" onClick={toggleTodosDeptos} className="text-[10px] text-[#3b82f6] hover:underline">{form.departamentos.length === DEPARTAMENTOS_CO.length ? "Deseleccionar todos" : "Seleccionar todos"}</button>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-[#252932] rounded bg-[#1c2028]">
+              {DEPARTAMENTOS_CO.map(d => <button key={d} type="button" onClick={() => toggleDepto(d)} className={`text-xs px-2 py-1 rounded-full border ${form.departamentos.includes(d) ? "border-[#3b82f6] bg-[#1e3a8a22] text-[#60a5fa]" : "border-[#252932] text-[#525a68]"}`}>{d}</button>)}
+            </div>
+          </div>
+          <div className="col-span-2">
+            <label className="text-[11px] text-[#525a68] block mb-1">CÓDIGOS UNSPC (separados por coma)</label>
+            <input type="text" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.codigos_unspc_str} onChange={e => setForm(f => ({ ...f, codigos_unspc_str: e.target.value }))} />
+            <p className="text-[10px] text-[#525a68] mt-1">Códigos que la IA usará para filtrar procesos relevantes. Separa con comas.</p>
+          </div>
+          <div className="col-span-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.restringir_minima} onChange={e => setForm(f => ({ ...f, restringir_minima: e.target.checked }))} className="w-4 h-4 accent-[#3b82f6]" />
+              <span className="text-[11px] text-[#525a68]">Restringir solo a procesos de Mínima Cuantía (para empresas pequeñas sin RUP)</span>
+            </label>
+          </div>
+          <div className="flex gap-4"><label className="flex items-center gap-2"><input type="checkbox" checked={form.usar_ia} onChange={e=>setForm(f=>({...f,usar_ia:e.target.checked}))} /><span className="text-xs">Usar IA</span></label><label className="flex items-center gap-2"><input type="checkbox" checked={form.activo} onChange={e=>setForm(f=>({...f,activo:e.target.checked}))} /><span className="text-xs">Activo al crear</span></label></div>
+        </div>
+        {err && <p className="text-red-500 text-xs mt-2">{err}</p>}
+        <div className="flex gap-2 mt-6"><button onClick={onClose} className="flex-1 py-2 bg-transparent border border-[#252932] rounded text-[#525a68]">Cancelar</button><button onClick={guardar} disabled={saving} className="flex-2 py-2 bg-[#3b82f6] rounded text-white font-bold">{saving ? "Creando..." : "Crear cliente"}</button></div>
+      </div>
+    </Overlay>
+  )
+}
+
+function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente; onClose: () => void; onUpdated: (c: Cliente) => void }) {
+  const [form, setForm] = useState({
+    nombre: cliente.nombre, usuario: cliente.usuario || "", password_hash: "",
+    descripcion_negocio: cliente.descripcion_negocio || "",
+    palabras_clave: (cliente.palabras_clave || []).join(", "),
+    palabras_excluidas: (cliente.palabras_excluidas || []).join(", "),
+    departamentos: cliente.departamentos || [],
+    presupuesto_minimo: String(cliente.presupuesto_minimo || 0),
+    usar_ia: cliente.usar_ia, email_destinatario: cliente.email_destinatario || "",
+    drive_url: cliente.drive_url || "",
+    codigos_unspc_str: (cliente.codigos_unspc || []).join(", "),
+    restringir_minima: (cliente.modalidades_permitidas || []).includes("Mínima Cuantía")
+  })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState("")
+  function toggleDepto(d: string) { setForm(f => ({ ...f, departamentos: f.departamentos.includes(d) ? f.departamentos.filter(x=>x!==d) : [...f.departamentos, d] })) }
+  function toggleTodosDeptos() { setForm(f => ({ ...f, departamentos: f.departamentos.length === DEPARTAMENTOS_CO.length ? [] : [...DEPARTAMENTOS_CO] })) }
+  async function guardar() {
+    setSaving(true); setErr("")
+    const codigosArray = form.codigos_unspc_str.split(",").map(c => c.trim()).filter(Boolean)
+    const modalidadesArray = form.restringir_minima ? ["Mínima Cuantía"] : null
+    const update: Partial<Cliente> = {
+      nombre: form.nombre.trim(), usuario: form.usuario.trim() || null,
+      descripcion_negocio: form.descripcion_negocio.trim(),
+      palabras_clave: form.palabras_clave.split(",").map(x=>x.trim()).filter(Boolean),
+      palabras_excluidas: form.palabras_excluidas.split(",").map(x=>x.trim()).filter(Boolean),
+      departamentos: form.departamentos, presupuesto_minimo: Number(form.presupuesto_minimo) || 0,
+      usar_ia: form.usar_ia, email_destinatario: form.email_destinatario.trim() || null,
+      drive_url: form.drive_url.trim() || null, codigos_unspc: codigosArray,
+      modalidades_permitidas: modalidadesArray,
+    }
+    if (form.password_hash.trim()) update.password_hash = form.password_hash.trim()
+    const { error } = await supabase.from("clientes").update(update).eq("id", cliente.id)
+    setSaving(false)
+    if (error) { setErr(error.message); return }
+    onUpdated({ ...cliente, ...update })
+    onClose()
+  }
+  return (
+    <Overlay onClose={onClose}>
+      <div className="w-[min(720px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
+        <div className="flex justify-between items-center mb-6"><div><h2 className="text-lg font-bold text-white">Editar cliente</h2><p className="text-xs text-[#3b82f6]">{cliente.id}</p></div><CloseBtn onClose={onClose} /></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div><label className="text-[11px] text-[#525a68]">NOMBRE EMPRESA</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.nombre} onChange={e=>setForm(f=>({...f,nombre:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68]">USUARIO</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.usuario} onChange={e=>setForm(f=>({...f,usuario:e.target.value}))} /></div>
+          <div className="col-span-2"><label className="text-[11px] text-[#525a68]">NUEVA CONTRASEÑA (dejar vacío para no cambiar)</label><input type="password" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.password_hash} onChange={e=>setForm(f=>({...f,password_hash:e.target.value}))} /></div>
+          <div className="col-span-2"><label className="text-[11px] text-[#525a68]">DESCRIPCIÓN</label><textarea rows={2} className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.descripcion_negocio} onChange={e=>setForm(f=>({...f,descripcion_negocio:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68]">PALABRAS CLAVE</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.palabras_clave} onChange={e=>setForm(f=>({...f,palabras_clave:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68]">PALABRAS EXCLUIDAS</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.palabras_excluidas} onChange={e=>setForm(f=>({...f,palabras_excluidas:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68]">PRESUPUESTO MÍNIMO</label><input type="number" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.presupuesto_minimo} onChange={e=>setForm(f=>({...f,presupuesto_minimo:e.target.value}))} /></div>
+          <div><label className="text-[11px] text-[#525a68]">EMAIL NOTIFICACIONES</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.email_destinatario} onChange={e=>setForm(f=>({...f,email_destinatario:e.target.value}))} /></div>
+          <div className="col-span-2"><label className="text-[11px] text-[#525a68]">GOOGLE DRIVE URL</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.drive_url} onChange={e=>setForm(f=>({...f,drive_url:e.target.value}))} /></div>
+          <div className="col-span-2">
+            <div className="flex justify-between items-center mb-1"><label className="text-[11px] text-[#525a68]">DEPARTAMENTOS</label><button type="button" onClick={toggleTodosDeptos} className="text-[10px] text-[#3b82f6] hover:underline">{form.departamentos.length === DEPARTAMENTOS_CO.length ? "Deseleccionar todos" : "Seleccionar todos"}</button></div>
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-[#252932] rounded bg-[#1c2028]">{DEPARTAMENTOS_CO.map(d=> <button key={d} type="button" onClick={()=>toggleDepto(d)} className={`text-xs px-2 py-1 rounded-full border ${form.departamentos.includes(d) ? "border-[#3b82f6] bg-[#1e3a8a22] text-[#60a5fa]" : "border-[#252932] text-[#525a68]"}`}>{d}</button>)}</div>
+          </div>
+          <div className="col-span-2">
+            <label className="text-[11px] text-[#525a68] block mb-1">CÓDIGOS UNSPC (separados por coma)</label>
+            <input type="text" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.codigos_unspc_str} onChange={e=>setForm(f=>({...f,codigos_unspc_str:e.target.value}))} />
+          </div>
+          <div className="col-span-2">
+            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={form.restringir_minima} onChange={e => setForm(f => ({ ...f, restringir_minima: e.target.checked }))} className="w-4 h-4 accent-[#3b82f6]" /><span className="text-[11px] text-[#525a68]">Restringir solo a procesos de Mínima Cuantía</span></label>
+          </div>
+          <div><label className="flex items-center gap-2"><input type="checkbox" checked={form.usar_ia} onChange={e=>setForm(f=>({...f,usar_ia:e.target.checked}))} /><span className="text-xs">Usar IA</span></label></div>
+        </div>
+        {err && <p className="text-red-500 text-xs mt-2">{err}</p>}
+        <div className="flex gap-2 mt-6"><button onClick={onClose} className="flex-1 py-2 bg-transparent border border-[#252932] rounded text-[#525a68]">Cancelar</button><button onClick={guardar} disabled={saving} className="flex-2 py-2 bg-[#3b82f6] rounded text-white font-bold">{saving ? "Guardando..." : "Guardar cambios"}</button></div>
+      </div>
+    </Overlay>
+  )
+}
+
+function ModalEliminar({ nombre, onClose, onConfirm, loading }: { nombre: string; onClose: () => void; onConfirm: () => void; loading: boolean }) {
+  return (
+    <Overlay onClose={onClose}>
+      <div className="w-[400px] bg-[#111318] border border-[#252932] rounded-2xl p-6 text-center">
+        <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center mx-auto mb-4 text-2xl">⚠️</div>
+        <h3 className="text-lg font-bold text-white mb-2">Eliminar cliente</h3>
+        <p className="text-sm text-[#8b919e] mb-4">¿Confirmas eliminar <strong>{nombre}</strong>? Se borrarán también sus procesos y feedback. <span className="text-red-500">No reversible.</span></p>
+        <div className="flex gap-3"><button onClick={onClose} className="flex-1 py-2 bg-transparent border border-[#252932] rounded text-[#525a68]">Cancelar</button><button onClick={onConfirm} disabled={loading} className="flex-1 py-2 bg-red-600 rounded text-white font-bold">{loading ? "Eliminando..." : "Sí, eliminar"}</button></div>
+      </div>
+    </Overlay>
+  )
+}
+
+function ModalProcesoManual({ clientes, onClose, onCreated }: { clientes: Cliente[]; onClose: () => void; onCreated: (p: Proceso) => void }) {
+  const [form, setForm] = useState({
+    cliente_id: clientes[0]?.id || "", referencia: "", entidad: "", departamento: "", ciudad: "",
+    modalidad: "Contratación Directa", objeto: "", presupuesto: "", fecha_publicacion: "", fecha_oferta: "",
+    url: "", resultado_ia: false, razon_ia: ""
+  })
+  const [saving, setSaving] = useState(false); const [err, setErr] = useState("")
+  async function guardar() {
+    if (!form.cliente_id || !form.referencia.trim() || !form.entidad.trim()) { setErr("Cliente, Referencia y Entidad son obligatorios."); return }
+    setSaving(true); setErr("")
+    const { data, error } = await supabase.from("procesos").insert([{
+      cliente_id: form.cliente_id, referencia: form.referencia.trim(), entidad: form.entidad.trim(),
+      departamento: form.departamento.trim() || null, ciudad: form.ciudad.trim() || null, modalidad: form.modalidad || null,
+      objeto: form.objeto.trim() || null, presupuesto: Number(form.presupuesto) || 0,
+      fecha_publicacion: form.fecha_publicacion || null, fecha_oferta: form.fecha_oferta || null,
+      url: form.url.trim() || null, resultado_ia: form.resultado_ia, razon_ia: form.razon_ia.trim() || null,
+      estado: "nuevo", etapa_seguimiento: 0, es_manual: true,
+    }]).select().single()
+    setSaving(false)
+    if (error) { setErr(error.message); return }
+    onCreated(data as Proceso)
+    onClose()
+  }
+  return (
+    <Overlay onClose={onClose}>
+      <div className="w-[min(680px,95vw)] max-h-[90vh] overflow-y-auto bg-[#111318] border border-[#252932] rounded-2xl p-6">
+        <div className="flex justify-between"><h2 className="text-lg font-bold text-white">Agregar proceso manual</h2><CloseBtn onClose={onClose} /></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div className="col-span-2"><label className="text-xs text-[#525a68]">CLIENTE *</label><select className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.cliente_id} onChange={e=>setForm(f=>({...f,cliente_id:e.target.value}))}>{clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}</select></div>
+          <div><label className="text-xs text-[#525a68]">REFERENCIA *</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.referencia} onChange={e=>setForm(f=>({...f,referencia:e.target.value}))} /></div>
+          <div><label className="text-xs text-[#525a68]">ENTIDAD *</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.entidad} onChange={e=>setForm(f=>({...f,entidad:e.target.value}))} /></div>
+          <div><label className="text-xs text-[#525a68]">DEPARTAMENTO</label><select className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.departamento} onChange={e=>setForm(f=>({...f,departamento:e.target.value}))}><option value="">—</option>{DEPARTAMENTOS_CO.map(d=><option key={d}>{d}</option>)}</select></div>
+          <div><label className="text-xs text-[#525a68]">CIUDAD</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.ciudad} onChange={e=>setForm(f=>({...f,ciudad:e.target.value}))} /></div>
+          <div><label className="text-xs text-[#525a68]">MODALIDAD</label><select className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.modalidad} onChange={e=>setForm(f=>({...f,modalidad:e.target.value}))}><option>Licitación Pública</option><option>Selección Abreviada</option><option>Concurso de Méritos</option><option>Contratación Directa</option><option>Mínima Cuantía</option><option>Régimen Especial</option></select></div>
+          <div><label className="text-xs text-[#525a68]">PRESUPUESTO (COP)</label><input type="number" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.presupuesto} onChange={e=>setForm(f=>({...f,presupuesto:e.target.value}))} /></div>
+          <div><label className="text-xs text-[#525a68]">FECHA PUBLICACIÓN</label><input type="date" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.fecha_publicacion} onChange={e=>setForm(f=>({...f,fecha_publicacion:e.target.value}))} /></div>
+          <div><label className="text-xs text-[#525a68]">FECHA CIERRE</label><input type="date" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.fecha_oferta} onChange={e=>setForm(f=>({...f,fecha_oferta:e.target.value}))} /></div>
+          <div className="col-span-2"><label className="text-xs text-[#525a68]">OBJETO</label><textarea rows={2} className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.objeto} onChange={e=>setForm(f=>({...f,objeto:e.target.value}))} /></div>
+          <div className="col-span-2"><label className="text-xs text-[#525a68]">URL SECOP</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white" value={form.url} onChange={e=>setForm(f=>({...f,url:e.target.value}))} /></div>
+          <div className="col-span-2"><label><input type="checkbox" checked={form.resultado_ia} onChange={e=>setForm(f=>({...f,resultado_ia:e.target.checked}))} /> Marcado como aprobado por IA</label></div>
+        </div>
+        {err && <p className="text-red-500 text-xs mt-2">{err}</p>}
+        <div className="flex gap-2 mt-6"><button onClick={onClose} className="flex-1 py-2 bg-transparent border border-[#252932] rounded text-[#525a68]">Cancelar</button><button onClick={guardar} disabled={saving} className="flex-2 py-2 bg-[#22c55e] rounded text-white font-bold">{saving ? "Guardando..." : "Agregar proceso"}</button></div>
+      </div>
+    </Overlay>
+  )
+}
 
 // ---------- COMPONENTE PRINCIPAL ADMIN ----------
 export default function AdminPage() {
@@ -316,12 +537,13 @@ export default function AdminPage() {
   const clientesFilt = clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()) || c.id.toLowerCase().includes(busqueda.toLowerCase()))
   const procesosFilt = procesos.filter(p => {
     if (clienteSel && p.cliente_id !== clienteSel) return false
-    if (estadoSel !== "todos" && p.estado !== estadoSel) return false
+    if (estadoSel !== "todos" && p.estado !== estadoSel && (estadoSel !== "acompanamiento" || !p.en_acompanamiento)) return false
+    if (estadoSel === "acompanamiento" && !p.en_acompanamiento) return false
     if (busqueda && !p.entidad?.toLowerCase().includes(busqueda.toLowerCase()) && !p.referencia.toLowerCase().includes(busqueda.toLowerCase()) && !p.objeto?.toLowerCase().includes(busqueda.toLowerCase())) return false
     return true
   })
-  const interesados = procesosFilt.filter(p => p.estado === "interesado")
-  const nuevos = procesosFilt.filter(p => p.estado === "nuevo")
+  const interesados = procesosFilt.filter(p => p.estado === "interesado" && !p.en_acompanamiento)
+  const nuevos = procesosFilt.filter(p => p.estado === "nuevo" && !p.en_acompanamiento)
   const descartados = procesosFilt.filter(p => p.estado === "descartado")
   const acompanamiento = procesosFilt.filter(p => p.en_acompanamiento === true)
   const activos = clientes.filter(c => c.activo).length
@@ -349,7 +571,7 @@ export default function AdminPage() {
     return ultimos7
   }, [procesos, feedback])
 
-  if (!authed) return ( // login screen
+  if (!authed) return (
     <div className="min-h-screen bg-[#0a0c10] flex items-center justify-center">
       <div className="bg-[#111318] border border-[#252932] rounded-2xl p-8 w-96 text-center">
         <span className="font-display text-3xl font-black"><span className="text-white">sof</span><span className="text-[#3b82f6]">ia</span></span>
@@ -516,7 +738,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB CLIENTES (sin cambios) */}
+        {/* TAB CLIENTES */}
         {tab === "clientes" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {clientesFilt.map(c=>(
@@ -535,7 +757,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB FEEDBACK (sin cambios) */}
+        {/* TAB FEEDBACK */}
         {tab === "feedback" && (
           <div className="bg-[#15181f] border border-[#252932] rounded-xl overflow-auto">
             <table className="w-full text-sm">
@@ -555,6 +777,3 @@ export default function AdminPage() {
     </div>
   )
 }
-
-// NOTA: Los modales ModalNuevoCliente, ModalEditarCliente, ModalEliminar, ModalProcesoManual se mantienen igual que en tu código original (no los he repetido para no alargar, pero están incluidos en la versión final que te daré). 
-// Asegúrate de copiarlos de tu código actual o de la versión que te entregaré completa.
