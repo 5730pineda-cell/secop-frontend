@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import type { Cliente, Proceso, Feedback } from "@/types"
+import type { Cliente, Proceso, Feedback, SolicitudAcompanamiento, Comentario } from "@/types"
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   BarChart, Bar, CartesianGrid, PieChart, Pie, Cell, AreaChart, Area
@@ -12,7 +12,7 @@ import {
   Clock, TrendingUp, PieChart as PieChartIcon, Zap, Save, AlertTriangle,
   FileText, CheckCircle, MapPin, Briefcase, Filter, DollarSign, Users,
   Activity, UserCheck, Eye, Trash2, Edit3, ChevronRight, RefreshCw,
-  PlusCircle, BarChart as BarChartIcon
+  PlusCircle, BarChart as BarChartIcon, MessageSquare, Calendar, HelpCircle
 } from "lucide-react"
 
 // ---------- CONSTANTES ----------
@@ -92,14 +92,14 @@ function TimelineAdmin({ procesoId, etapa, onUpdate }: { procesoId: string; etap
 }
 
 // ---------- MODAL NUEVO CLIENTE ----------
-function ModalNuevoCliente({ onClose, onCreated }: { onClose: () => void; onCreated: (c: Cliente) => void }) {
+function ModalNuevoCliente({ onClose, onCreated, prefillData }: { onClose: () => void; onCreated: (c: Cliente) => void; prefillData?: Partial<Cliente> }) {
   const [form, setForm] = useState({
-    id: "", nombre: "", usuario: "", password_hash: "",
-    descripcion_negocio: "", palabras_clave: "", palabras_excluidas: "",
-    departamentos: [] as string[], presupuesto_minimo: "0",
-    usar_ia: true, activo: true, email_destinatario: "", drive_url: "",
-    codigos_unspc_str: "",
-    restringir_minima: false   // nuevo flag
+    id: prefillData?.id || "", nombre: prefillData?.nombre || "", usuario: prefillData?.usuario || "", password_hash: "",
+    descripcion_negocio: prefillData?.descripcion_negocio || "", palabras_clave: "", palabras_excluidas: "",
+    departamentos: prefillData?.departamentos || [] as string[], presupuesto_minimo: String(prefillData?.presupuesto_minimo || "0"),
+    usar_ia: prefillData?.usar_ia ?? true, activo: prefillData?.activo ?? true, email_destinatario: prefillData?.email_destinatario || "", drive_url: "",
+    codigos_unspc_str: (prefillData?.codigos_unspc || []).join(", "),
+    restringir_minima: false
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState("")
@@ -283,7 +283,7 @@ function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente;
   )
 }
 
-// ---------- MODAL PROCESO MANUAL (sin cambios relevantes) ----------
+// ---------- MODAL PROCESO MANUAL ----------
 function ModalProcesoManual({ clientes, onClose, onCreated }: { clientes: Cliente[]; onClose: () => void; onCreated: (p: Proceso) => void }) {
   const [form, setForm] = useState({
     cliente_id: clientes[0]?.id || "", referencia: "", entidad: "", departamento: "", ciudad: "",
@@ -355,6 +355,7 @@ export default function AdminPage() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [procesos, setProcesos] = useState<Proceso[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
+  const [solicitudes, setSolicitudes] = useState<SolicitudAcompanamiento[]>([])
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState("")
   const [clienteSel, setClienteSel] = useState<string | null>(null)
@@ -373,9 +374,20 @@ export default function AdminPage() {
   const [showNuevoProceso, setShowNuevoProceso] = useState(false)
   const [notificaciones, setNotificaciones] = useState<Feedback[]>([])
   const [mostrarNotis, setMostrarNotis] = useState(false)
+  // Nuevos estados para solicitudes, comentarios, fechas y resultados
+  const [comentariosAdminMap, setComentariosAdminMap] = useState<Record<string, Comentario[]>>({})
+  const [nuevoComentarioAdmin, setNuevoComentarioAdmin] = useState<Record<string, string>>({})
+  const [mostrarPanelComentarios, setMostrarPanelComentarios] = useState<string | null>(null)
+  const [editarFechasEtapa, setEditarFechasEtapa] = useState<{ procesoId: string; etapa: number } | null>(null)
+  const [fechaTemp, setFechaTemp] = useState("")
+  const [fechaInformeTemp, setFechaInformeTemp] = useState("")
+  const [resultadoTemp, setResultadoTemp] = useState<"ganado" | "perdido" | "desierto" | "">("")
+  const [notaResultadoTemp, setNotaResultadoTemp] = useState("")
+  const [mostrarModalResultado, setMostrarModalResultado] = useState<string | null>(null)
+  const [prefillCliente, setPrefillCliente] = useState<Partial<Cliente> | undefined>(undefined)
 
   useEffect(() => {
-   if (sessionStorage.getItem("secop_admin") === btoa(ADMIN_PASS)) { setAuthed(true); cargar() }
+    if (sessionStorage.getItem("secop_admin") === btoa(ADMIN_PASS)) { setAuthed(true); cargar() }
     else setLoading(false)
   }, [])
 
@@ -386,14 +398,16 @@ export default function AdminPage() {
 
   async function cargar() {
     setLoading(true)
-    const [{ data: c }, { data: p }, { data: f }] = await Promise.all([
+    const [{ data: c }, { data: p }, { data: f }, { data: s }] = await Promise.all([
       supabase.from("clientes").select("*").order("nombre"),
       supabase.from("procesos").select("*").order("updated_at", { ascending: false }),
       supabase.from("feedback").select("*").order("created_at", { ascending: false }),
+      supabase.from("solicitudes_acompanamiento").select("*").order("created_at", { ascending: false }),
     ])
     setClientes(c || [])
     setProcesos(p || [])
     setFeedback(f || [])
+    setSolicitudes(s || [])
     const hoy = new Date()
     const ayer = new Date(hoy.getTime() - 24*60*60*1000)
     const nuevosFeed = (f || []).filter(fb => new Date(fb.created_at) > ayer && (fb.accion === "interesado" || fb.accion === "enviado_sofia"))
@@ -449,6 +463,67 @@ export default function AdminPage() {
     mostrarToast(`Etapa actualizada: ${ETAPAS[etapa]}`)
   }
 
+  // ========== NUEVAS FUNCIONES ==========
+  async function actualizarEstadoSolicitud(id: string, nuevoEstado: string) {
+    await supabase.from("solicitudes_acompanamiento").update({ estado: nuevoEstado }).eq("id", id)
+    setSolicitudes(prev => prev.map(s => s.id === id ? { ...s, estado: nuevoEstado as any } : s))
+    mostrarToast("Estado actualizado")
+  }
+
+  async function cargarComentariosAdmin(procesoId: string) {
+    const { data } = await supabase.from("comentarios").select("*").eq("proceso_id", procesoId).order("created_at", { ascending: true })
+    if (data) setComentariosAdminMap(prev => ({ ...prev, [procesoId]: data }))
+  }
+
+  async function enviarComentarioAdmin(procesoId: string, clienteId: string) {
+    const texto = nuevoComentarioAdmin[procesoId]?.trim()
+    if (!texto) return
+    await supabase.from("comentarios").insert({
+      proceso_id: procesoId,
+      cliente_id: clienteId,
+      autor: "admin",
+      texto
+    })
+    await cargarComentariosAdmin(procesoId)
+    setNuevoComentarioAdmin(prev => ({ ...prev, [procesoId]: "" }))
+    mostrarToast("Comentario enviado al cliente")
+  }
+
+  async function guardarFechasEtapa(procesoId: string, etapa: number, fecha: string) {
+    const campo = `fecha_etapa_${etapa}`
+    await supabase.from("procesos").update({ [campo]: fecha || null }).eq("id", procesoId)
+    setProcesos(prev => prev.map(p => p.id === procesoId ? { ...p, [campo]: fecha || null } : p))
+    setEditarFechasEtapa(null)
+    setFechaTemp("")
+    mostrarToast(`Fecha de ${ETAPAS[etapa]} guardada`)
+  }
+
+  async function guardarResultadoFinal(procesoId: string) {
+    await supabase.from("procesos").update({
+      resultado_final: resultadoTemp || null,
+      nota_resultado: notaResultadoTemp || null,
+      fecha_informe_evaluacion: fechaInformeTemp || null
+    }).eq("id", procesoId)
+    setProcesos(prev => prev.map(p => p.id === procesoId ? { ...p, resultado_final: resultadoTemp || null, nota_resultado: notaResultadoTemp || null, fecha_informe_evaluacion: fechaInformeTemp || null } : p))
+    setMostrarModalResultado(null)
+    setResultadoTemp("")
+    setNotaResultadoTemp("")
+    setFechaInformeTemp("")
+    mostrarToast("Resultado final actualizado")
+  }
+
+  // Suscripción en tiempo real a solicitudes
+  useEffect(() => {
+    if (!authed) return
+    const subscription = supabase
+      .channel('solicitudes_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'solicitudes_acompanamiento' }, () => {
+        cargar()
+      })
+      .subscribe()
+    return () => { subscription.unsubscribe() }
+  }, [authed])
+
   const clientesFilt = clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()) || c.id.toLowerCase().includes(busqueda.toLowerCase()))
   const procesosFilt = procesos.filter(p => {
     if (clienteSel && p.cliente_id !== clienteSel) return false
@@ -461,6 +536,11 @@ export default function AdminPage() {
   const descartados = procesosFilt.filter(p => p.estado === "descartado")
   const activos = clientes.filter(c => c.activo).length
   const presTotalInteres = procesos.filter(p => p.estado === "interesado").reduce((s,p) => s + Number(p.presupuesto || 0), 0)
+
+  // Tasa de éxito
+  const radicados = procesos.filter(p => p.etapa_seguimiento === 4 && p.resultado_final).length
+  const ganados = procesos.filter(p => p.resultado_final === 'ganado').length
+  const tasaExito = radicados > 0 ? Math.round((ganados / radicados) * 100) : 0
 
   const topClientes = useMemo(() => {
     const mapa = new Map<string, number>()
@@ -516,14 +596,15 @@ export default function AdminPage() {
       </nav>
 
       <div className="max-w-[1400px] mx-auto p-6">
-        {/* Stats row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+        {/* Stats row con tasa de éxito */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Clientes activos</div><div className="text-2xl font-bold text-[#60a5fa]">{activos}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Total procesos</div><div className="text-2xl font-bold text-[#22c55e]">{procesos.length}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Interesados</div><div className="text-2xl font-bold text-[#f59e0b]">{procesos.filter(p=>p.estado==="interesado").length}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Presupuesto interesado</div><div className="text-sm font-bold text-[#34d399]">{fmt(presTotalInteres)}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Feedback hoy</div><div className="text-2xl font-bold text-[#f472b6]">{feedback.filter(f=>f.created_at?.startsWith(new Date().toISOString().slice(0,10))).length}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Manuales</div><div className="text-2xl font-bold text-[#a78bfa]">{procesos.filter(p=>p.es_manual).length}</div></div>
+          <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Tasa éxito (radicados)</div><div className="text-2xl font-bold text-[#22c55e]">{tasaExito}%</div><div className="text-[9px]">{ganados} ganados / {radicados} radicados</div></div>
         </div>
 
         {/* Gráficos */}
@@ -549,15 +630,15 @@ export default function AdminPage() {
           </div>
           <div className="flex gap-2">
             <button onClick={()=>setShowNuevoProceso(true)} className="text-xs px-3 py-1.5 bg-[#22c55e]/20 border border-[#22c55e]/40 rounded text-[#22c55e]">+ Proceso manual</button>
-            <button onClick={()=>setShowNuevoCliente(true)} className="text-xs px-3 py-1.5 bg-[#3b82f6]/20 border border-[#3b82f6]/40 rounded text-[#3b82f6]">+ Nuevo cliente</button>
+            <button onClick={()=>{ setPrefillCliente(undefined); setShowNuevoCliente(true); }} className="text-xs px-3 py-1.5 bg-[#3b82f6]/20 border border-[#3b82f6]/40 rounded text-[#3b82f6]">+ Nuevo cliente</button>
           </div>
         </div>
 
         <div className="flex gap-2 border-b border-[#252932] mb-4">
-          {["procesos","clientes","feedback"].map(t=> <button key={t} onClick={()=>setTab(t)} className={`px-4 py-2 text-sm font-medium ${tab===t ? "text-[#3b82f6] border-b-2 border-[#3b82f6]" : "text-[#8b919e]"}`}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
+          {["procesos","clientes","feedback","solicitudes"].map(t=> <button key={t} onClick={()=>setTab(t)} className={`px-4 py-2 text-sm font-medium ${tab===t ? "text-[#3b82f6] border-b-2 border-[#3b82f6]" : "text-[#8b919e]"}`}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
         </div>
 
-        {/* TAB PROCESOS */}
+        {/* TAB PROCESOS (con comentarios, fechas de etapa, resultado) */}
         {tab === "procesos" && (
           <div className="space-y-4">
             <div className="text-xs text-[#8b919e] flex gap-4"><span>Interesados: {interesados.length}</span><span>Nuevos: {nuevos.length}</span><span>Descartados: {descartados.length}</span></div>
@@ -587,6 +668,48 @@ export default function AdminPage() {
                       <TimelineAdmin procesoId={p.id} etapa={p.etapa_seguimiento ?? 0} onUpdate={actualizarEtapa} />
                     </div>
                   )}
+                  {/* Comentarios admin */}
+                  <div className="mt-3 pt-2 border-t border-[#252932]">
+                    <button onClick={() => { setMostrarPanelComentarios(mostrarPanelComentarios === p.id ? null : p.id); cargarComentariosAdmin(p.id) }} className="text-xs flex items-center gap-1 text-[#60a5fa]"><MessageSquare size={12}/> Comentarios ({comentariosAdminMap[p.id]?.length || 0})</button>
+                    {mostrarPanelComentarios === p.id && (
+                      <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
+                        {(comentariosAdminMap[p.id] || []).map(c => (
+                          <div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-[#3b82f6]/10 border-l-2 border-[#3b82f6]' : 'bg-[#1c2028]'}`}>
+                            <div className="flex justify-between text-[10px] text-[#525a68]"><span className="font-bold">{c.autor === 'admin' ? 'Admin' : 'Cliente'}</span><span>{new Date(c.created_at).toLocaleString()}</span></div>
+                            <p className="text-white/80">{c.texto}</p>
+                          </div>
+                        ))}
+                        <div className="flex gap-1 mt-1"><input type="text" placeholder="Responder..." className="flex-1 text-xs bg-[#1c2028] p-1 rounded" value={nuevoComentarioAdmin[p.id] || ""} onChange={e => setNuevoComentarioAdmin({...nuevoComentarioAdmin, [p.id]: e.target.value})} /><button onClick={() => enviarComentarioAdmin(p.id, p.cliente_id)} className="bg-[#3b82f6] text-xs px-2 py-1 rounded">Enviar</button></div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Botones de fecha de etapa y resultado */}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <button onClick={() => { setEditarFechasEtapa({ procesoId: p.id, etapa: p.etapa_seguimiento ?? 0 }); setFechaTemp(""); }} className="text-xs bg-[#1c2028] px-2 py-1 rounded"><Calendar size={10}/> Fecha etapa</button>
+                    {p.etapa_seguimiento === 4 && !p.resultado_final && (
+                      <button onClick={() => { setMostrarModalResultado(p.id); setResultadoTemp(""); setNotaResultadoTemp(p.nota_resultado || ""); setFechaInformeTemp(p.fecha_informe_evaluacion || ""); }} className="text-xs bg-[#f59e0b] px-2 py-1 rounded text-black font-bold">Registrar resultado</button>
+                    )}
+                  </div>
+                  {editarFechasEtapa?.procesoId === p.id && (
+                    <div className="mt-2 p-2 bg-[#1c2028] rounded flex gap-2">
+                      <input type="datetime-local" value={fechaTemp} onChange={e => setFechaTemp(e.target.value)} className="text-xs bg-[#0a0c10] p-1 rounded" />
+                      <button onClick={() => guardarFechasEtapa(p.id, editarFechasEtapa.etapa, fechaTemp)} className="text-xs bg-[#22c55e] px-2 py-1 rounded">Guardar</button>
+                      <button onClick={() => setEditarFechasEtapa(null)} className="text-xs bg-[#252932] px-2 py-1 rounded">Cancelar</button>
+                    </div>
+                  )}
+                  {mostrarModalResultado === p.id && (
+                    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setMostrarModalResultado(null)}>
+                      <div className="bg-[#111318] border border-[#252932] rounded-xl p-6 w-96" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-lg font-bold mb-4">Resultado final del proceso</h3>
+                        <div className="space-y-3">
+                          <div><label className="text-xs block mb-1">Fecha esperada informe</label><input type="datetime-local" className="w-full p-2 bg-[#1c2028] rounded" value={fechaInformeTemp} onChange={e => setFechaInformeTemp(e.target.value)} /></div>
+                          <div><label className="text-xs block mb-1">Resultado</label><select className="w-full p-2 bg-[#1c2028] rounded" value={resultadoTemp} onChange={e => setResultadoTemp(e.target.value as any)}><option value="">Seleccionar</option><option value="ganado">Ganado</option><option value="perdido">Perdido</option><option value="desierto">Desierto</option></select></div>
+                          <div><label className="text-xs block mb-1">Nota (opcional)</label><textarea rows={2} className="w-full p-2 bg-[#1c2028] rounded" value={notaResultadoTemp} onChange={e => setNotaResultadoTemp(e.target.value)} /></div>
+                        </div>
+                        <div className="flex gap-2 mt-4"><button onClick={() => setMostrarModalResultado(null)} className="flex-1 bg-[#252932] py-2 rounded">Cancelar</button><button onClick={() => guardarResultadoFinal(p.id)} className="flex-1 bg-[#3b82f6] py-2 rounded">Guardar</button></div>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-2 justify-between items-center mt-3 pt-2 border-t border-[#252932]">
                     <div className="flex gap-2">
                       {p.estado !== "interesado" && <button onClick={()=>cambiarEstadoProceso(p.id, "interesado")} className="text-xs bg-[#f59e0b22] text-[#f59e0b] px-2 py-1 rounded">Marcar Interés</button>}
@@ -605,7 +728,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB CLIENTES */}
+        {/* TAB CLIENTES (igual que antes) */}
         {tab === "clientes" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {clientesFilt.map(c=>(
@@ -624,16 +747,12 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB FEEDBACK */}
+        {/* TAB FEEDBACK (igual) */}
         {tab === "feedback" && (
           <div className="bg-[#15181f] border border-[#252932] rounded-xl overflow-auto">
             <table className="w-full text-sm">
               <thead className="border-b border-[#252932]">
-                <tr>
-                  {["Cliente","Proceso","Acción","Nota","Fecha"].map(h => (
-                    <th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>
-                  ))}
-                </tr>
+                <tr>{["Cliente","Proceso","Acción","Nota","Fecha"].map(h => <th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {feedback.slice(0,100).map(f => {
@@ -642,11 +761,7 @@ export default function AdminPage() {
                     <tr key={f.id} className="border-b border-[#1c2028]">
                       <td className="p-2 text-[11px] text-[#60a5fa]">{f.cliente_id || "—"}</td>
                       <td className="p-2 text-[10px] max-w-40 truncate">{proc?.entidad || f.proceso_id}</td>
-                      <td className="p-2">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>
-                          {f.accion}
-                        </span>
-                      </td>
+                      <td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>{f.accion}</span></td>
                       <td className="p-2 text-[11px]">{f.nota || "—"}</td>
                       <td className="p-2 text-[10px] text-[#525a68]">{new Date(f.created_at).toLocaleDateString()}</td>
                     </tr>
@@ -656,10 +771,32 @@ export default function AdminPage() {
             </table>
           </div>
         )}
+
+        {/* TAB SOLICITUDES */}
+        {tab === "solicitudes" && (
+          <div className="space-y-3">
+            {solicitudes.length === 0 ? <p className="text-center py-8 text-[#525a68]">No hay solicitudes de acompañamiento.</p> : solicitudes.map(s => (
+              <div key={s.id} className="bg-[#15181f] border border-[#252932] rounded-xl p-4">
+                <div className="flex justify-between items-start flex-wrap gap-2">
+                  <div><div className="font-bold text-white">{s.empresa}</div><div className="text-xs text-[#3b82f6]">Proceso: {s.numero_proceso}</div></div>
+                  <div className="flex gap-2 items-center">
+                    <select value={s.estado} onChange={e => actualizarEstadoSolicitud(s.id, e.target.value)} className="text-xs bg-[#1c2028] rounded px-2 py-1">
+                      <option value="pendiente">Pendiente</option><option value="en_proceso">En proceso</option><option value="atendida">Atendida</option>
+                    </select>
+                    <button onClick={() => { setPrefillCliente({ nombre: s.empresa, descripcion_negocio: `Solicitud de acompañamiento: ${s.numero_proceso}`, email_destinatario: s.empresa.includes('@') ? s.empresa : undefined }); setShowNuevoCliente(true); }} className="text-xs bg-[#3b82f6] px-2 py-1 rounded">Crear cliente</button>
+                  </div>
+                </div>
+                <div className="text-sm text-[#8b919e] mt-2"><a href={s.enlace} target="_blank" rel="noreferrer" className="text-[#60a5fa]">Ver SECOP</a></div>
+                {s.observaciones && <p className="text-xs mt-2 italic">{s.observaciones}</p>}
+                <div className="text-[10px] text-[#525a68] mt-2">Solicitado: {new Date(s.created_at).toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {toast && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-[#1c2028] border border-[#252932] text-white px-4 py-2 rounded-lg text-sm z-[100]">{toast}</div>}
-      {showNuevoCliente && <ModalNuevoCliente onClose={()=>setShowNuevoCliente(false)} onCreated={c=>{setClientes(prev=>[...prev,c].sort((a,b)=>a.nombre.localeCompare(b.nombre)));mostrarToast(`Cliente ${c.nombre} creado.`)}} />}
+      {showNuevoCliente && <ModalNuevoCliente prefillData={prefillCliente} onClose={()=>{setShowNuevoCliente(false); setPrefillCliente(undefined);}} onCreated={c=>{setClientes(prev=>[...prev,c].sort((a,b)=>a.nombre.localeCompare(b.nombre)));mostrarToast(`Cliente ${c.nombre} creado.`)}} />}
       {editarCliente && <ModalEditarCliente cliente={editarCliente} onClose={()=>setEditarCliente(null)} onUpdated={c=>{setClientes(prev=>prev.map(x=>x.id===c.id?c:x));mostrarToast("Cliente actualizado.")}} />}
       {eliminarCliente && <ModalEliminar nombre={eliminarCliente.nombre} loading={elimLoading} onClose={()=>setEliminarCliente(null)} onConfirm={confirmarEliminar} />}
       {showNuevoProceso && <ModalProcesoManual clientes={clientes.filter(c=>c.activo)} onClose={()=>setShowNuevoProceso(false)} onCreated={p=>{setProcesos(prev=>[p,...prev]);mostrarToast("Proceso manual agregado.")}} />}
