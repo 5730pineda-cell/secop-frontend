@@ -44,6 +44,15 @@ export interface Proceso {
   es_manual: boolean
   created_at: string
   updated_at: string
+  // NUEVOS CAMPOS para fechas de etapas y resultado final
+  fecha_etapa_0?: string | null
+  fecha_etapa_1?: string | null
+  fecha_etapa_2?: string | null
+  fecha_etapa_3?: string | null
+  fecha_etapa_4?: string | null
+  fecha_informe_evaluacion?: string | null
+  resultado_final?: 'ganado' | 'perdido' | 'desierto' | null
+  nota_resultado?: string | null
 }
 
 export interface Feedback {
@@ -74,4 +83,27 @@ export interface Metrics {
   procesos_aprobados_ia: number
   ultima_ejecucion: string | null
   duracion_ultima_ejecucion: number | null
+}
+
+// ========== NUEVAS INTERFACES PARA SOLICITUDES Y COMENTARIOS ==========
+
+export interface SolicitudAcompanamiento {
+  id: string
+  cliente_id: string
+  empresa: string
+  numero_proceso: string
+  enlace: string
+  observaciones: string | null
+  estado: 'pendiente' | 'en_proceso' | 'atendida'
+  created_at: string
+  updated_at: string
+}
+
+export interface Comentario {
+  id: string
+  proceso_id: string
+  cliente_id: string
+  autor: 'cliente' | 'admin'
+  texto: string
+  created_at: string
 }
