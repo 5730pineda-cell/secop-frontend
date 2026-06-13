@@ -1,6 +1,6 @@
 "use client"
 import { useState, useEffect } from "react"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter, useParams } "next/navigation"
 import { supabase } from "@/lib/supabase"
 import type { Cliente, Proceso, Comentario, SolicitudAcompanamiento } from "@/types"
 import {
@@ -36,7 +36,7 @@ function diasRestantes(f: string | null): number | null {
 
 const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 
-// ---------- TIMELINE CORREGIDA ----------
+// ---------- TIMELINE ----------
 function Timeline({ etapa }: { etapa: number }) {
   const idx = Math.min(Math.max(0, etapa), 4)
   return (
@@ -146,16 +146,18 @@ export default function PortalCliente() {
     const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
+    // Obtener todas las solicitudes
     const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id)
     setSolicitudes(sol || [])
 
+    // IDs de procesos que ya tienen solicitud activa (pendiente o en_proceso)
     const idsExcluir = (sol || [])
       .filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso')
       .map(s => s.proceso_id)
       .filter(Boolean) as string[]
 
     const hoy = new Date().toISOString()
-    // Todos los procesos (para gráficos y detalles de acompañamiento)
+    // Todos los procesos (sin exclusión) para gráficos y para acompañamiento
     const { data: allProcesos } = await supabase
       .from("procesos")
       .select("*")
@@ -165,7 +167,7 @@ export default function PortalCliente() {
       .order("fecha_oferta", { ascending: true })
     setTodosProcesos(allProcesos || [])
 
-    // Procesos excluyendo los que tienen solicitud activa (para Nuevos/Intereses)
+    // Procesos excluyendo los que están en acompañamiento activo (para pestañas Nuevos/Intereses)
     let query = supabase
       .from("procesos")
       .select("*")
@@ -191,24 +193,30 @@ export default function PortalCliente() {
     }
   }
 
+  // --- Marcar interés ---
   async function marcarInteres(procesoId: string) {
     if (saving[procesoId]) return
     setSaving(prev => ({ ...prev, [procesoId]: true }))
     await supabase.from("procesos").update({ estado: "interesado", etapa_seguimiento: 0 }).eq("id", procesoId)
     await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "interesado" }])
+    // Actualización local
     setProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
     setTodosProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
     mostrarToast("✓ Interés registrado", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // --- FUNCIÓN ENVIAR A ACOMPAÑAMIENTO CORREGIDA (optimista) ---
+  // --- Enviar a acompañamiento (CORREGIDO: sin recarga, solo actualización local) ---
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
     const proc = todosProcesos.find(x => x.id === procesoId)
-    if (!proc) return
+    if (!proc) {
+      mostrarToast("No se encontró el proceso", "error")
+      return
+    }
     setSaving(prev => ({ ...prev, [procesoId]: "acompanamiento" }))
 
+    // Insertar en la base de datos
     const { data: newSolicitud, error } = await supabase
       .from("solicitudes_acompanamiento")
       .insert({
@@ -225,58 +233,64 @@ export default function PortalCliente() {
       .single()
 
     if (error) {
+      console.error("Error al insertar solicitud:", error)
       mostrarToast("Error: " + error.message, "error")
       setSaving(prev => ({ ...prev, [procesoId]: false }))
       return
     }
 
-    // Actualización optimista local
-    if (newSolicitud) {
-      // Agregar la nueva solicitud al inicio de la lista
-      setSolicitudes(prev => [newSolicitud, ...prev])
-      // Eliminar el proceso de las listas "procesos" y "todosProcesos"
-      setProcesos(prev => prev.filter(p => p.id !== procesoId))
-      setTodosProcesos(prev => prev.filter(p => p.id !== procesoId))
-    }
-
-    mostrarToast("Solicitud enviada. El proceso ahora está en Acompañamiento.", "ok")
+    // ACTUALIZACIÓN LOCAL INMEDIATA (sin recargar)
+    // 1. Eliminar el proceso de `procesos` y `todosProcesos`
+    setProcesos(prev => prev.filter(p => p.id !== procesoId))
+    setTodosProcesos(prev => prev.filter(p => p.id !== procesoId))
+    // 2. Agregar la nueva solicitud al inicio de `solicitudes`
+    setSolicitudes(prev => [newSolicitud, ...prev])
+    // 3. Cambiar a la pestaña de acompañamiento
     setTab("acompanamiento")
+    mostrarToast("Solicitud enviada. El proceso ahora está en Acompañamiento.", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
 
-    // Recargar en segundo plano para sincronizar (sin bloquear la UI)
+    // Opcional: refrescar datos en segundo plano para sincronizar (sin bloquear UI)
     cargar().catch(console.error)
   }
-  // --- FIN CORRECCIÓN ---
 
+  // --- Descartar proceso ---
   async function descartar(procesoId: string) {
     setProcesoADescartar(null)
     const p = procesos.find(x => x.id === procesoId)
-    if (p) {
-      setSaliendo(prev => ({ ...prev, [procesoId]: true }))
-      await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
-      await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
-      setDescartados(prev => [{ ...p, estado: "descartado" }, ...prev])
-      setTimeout(() => {
-        setProcesos(prev => prev.filter(x => x.id !== procesoId))
-        setTodosProcesos(prev => prev.filter(x => x.id !== procesoId))
-        setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n })
-      }, 320)
-      mostrarToast("Proceso descartado", "info")
-    }
+    if (!p) return
+
+    setSaliendo(prev => ({ ...prev, [procesoId]: true }))
+    await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
+    await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
+
+    // Actualización local: mover a descartados y eliminar de las listas activas
+    const procesoDescartado = { ...p, estado: "descartado" }
+    setDescartados(prev => [procesoDescartado, ...prev])
+    setProcesos(prev => prev.filter(x => x.id !== procesoId))
+    setTodosProcesos(prev => prev.filter(x => x.id !== procesoId))
+
+    setTimeout(() => {
+      setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n })
+    }, 320)
+    mostrarToast("Proceso descartado", "info")
   }
 
+  // --- Restaurar desde descartados ---
   async function restaurar(procesoId: string) {
     await supabase.from("procesos").update({ estado: "nuevo", updated_at: new Date().toISOString() }).eq("id", procesoId)
     const p = descartados.find(x => x.id === procesoId)
     if (p) {
-      setProcesos(prev => [{ ...p, estado: "nuevo" }, ...prev])
-      setTodosProcesos(prev => [{ ...p, estado: "nuevo" }, ...prev])
+      const restaurado = { ...p, estado: "nuevo" }
+      setProcesos(prev => [restaurado, ...prev])
+      setTodosProcesos(prev => [restaurado, ...prev])
     }
     setDescartados(prev => prev.filter(x => x.id !== procesoId))
     mostrarToast("Proceso restaurado", "ok")
     setTab("nuevos")
   }
 
+  // --- Comentarios (sin cambios, pero asegurar que funcionen) ---
   async function cargarComentariosSolicitud(solicitudId: string) {
     const { data } = await supabase.from("comentarios").select("*").eq("solicitud_id", solicitudId).order("created_at", { ascending: true })
     if (data) setComentariosSolicitud(prev => ({ ...prev, [solicitudId]: data }))
@@ -310,7 +324,7 @@ export default function PortalCliente() {
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
-  // Tendencia
+  // Tendencia (últimos 30 días)
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = todosProcesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
@@ -488,7 +502,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO */}
+            {/* PESTAÑA ACOMPAÑAMIENTO (sin cambios en el render, solo usa los datos actualizados) */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
@@ -515,9 +529,7 @@ export default function PortalCliente() {
                             <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proceso?.entidad || "Proceso"}</h3>
                           </div>
                           <div className="text-right flex-shrink-0">
-                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
-                              {fmt(proceso?.presupuesto)}
-                            </div>
+                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso?.presupuesto)}</div>
                             <div className="flex items-center justify-end gap-2 mt-1">
                               <div className={`text-[10px] px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
                                 {sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}
