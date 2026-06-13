@@ -11,7 +11,8 @@ import {
   Bell, Search, LogOut, ExternalLink, Send, FolderOpen, Archive,
   Clock, PieChart as PieChartIcon, Zap, CheckCircle, MapPin, Briefcase,
   Filter, DollarSign, MessageSquare, HelpCircle,
-  Calendar, ChevronDown, ChevronUp, Sun, Moon, TrendingUp, Eye, EyeOff
+  Calendar, ChevronDown, ChevronUp, Sun, Moon, TrendingUp, Eye, EyeOff,
+  Trophy
 } from "lucide-react"
 
 // ---------- HELPERS ----------
@@ -87,7 +88,7 @@ export default function PortalCliente() {
   const id = params.id as string
 
   const [cliente, setCliente] = useState<Cliente | null>(null)
-  const [procesos, setProcesos] = useState<Proceso[]>([])        // todos los procesos activos (incluye acompañamiento)
+  const [procesos, setProcesos] = useState<Proceso[]>([])
   const [descartados, setDescartados] = useState<Proceso[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -136,12 +137,10 @@ export default function PortalCliente() {
     if (ce || !c) { setError("Cliente no encontrado."); setLoading(false); return }
     setCliente(c)
 
-    // Limpiar vencidos
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "nuevo").lt("fecha_oferta", new Date().toISOString())
     const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
-    // Cargar todos los procesos activos (no descartados)
     const hoy = new Date().toISOString()
     const { data: allProcesos } = await supabase
       .from("procesos")
@@ -169,7 +168,6 @@ export default function PortalCliente() {
     }
   }
 
-  // Marcar interés (si no está en acompañamiento)
   async function marcarInteres(procesoId: string) {
     if (saving[procesoId]) return
     setSaving(prev => ({ ...prev, [procesoId]: true }))
@@ -180,7 +178,6 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // Enviar a acompañamiento (ahora solo actualiza el proceso)
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
     const proc = procesos.find(x => x.id === procesoId)
@@ -200,7 +197,6 @@ export default function PortalCliente() {
     if (error) {
       mostrarToast("Error: " + error.message, "error")
     } else {
-      // Actualización local
       setProcesos(prev => prev.map(p => p.id === procesoId ? {
         ...p,
         en_acompanamiento: true,
@@ -270,18 +266,23 @@ export default function PortalCliente() {
   const interesados = procesos.filter(p => p.estado === "interesado" && !p.en_acompanamiento)
   const acompanamiento = procesos.filter(p => p.en_acompanamiento === true)
 
-  // Datos para gráficos (usando procesos completos)
+  // Datos para gráficos
   const presNuevos = nuevos.reduce((sum, p) => sum + (p.presupuesto || 0), 0)
   const presInteresados = interesados.reduce((sum, p) => sum + (p.presupuesto || 0), 0)
   const presAcompanamiento = acompanamiento.reduce((sum, p) => sum + (p.presupuesto || 0), 0)
   const presTotal = presNuevos + presInteresados + presAcompanamiento
 
-  // Tendencia (últimos 30 días)
+  // Procesos Ganados (cuando el admin marca resultado_final = 'ganado')
+  const procesosGanados = procesos.filter(p => p.resultado_final === 'ganado')
+  const ganadosCount = procesosGanados.length
+  const ganadosMonto = procesosGanados.reduce((sum, p) => sum + (p.presupuesto || 0), 0)
+
+  // Tendencia: basada en fecha_publicacion (procesos notificados cada día en últimos 30 días)
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
-  const procesosTendencia = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
+  const procesosTendencia = procesos.filter(p => p.fecha_publicacion && new Date(p.fecha_publicacion) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
   procesosTendencia.forEach(p => {
-    const fechaKey = new Date(p.fecha_oferta!).toISOString().split('T')[0]
+    const fechaKey = new Date(p.fecha_publicacion!).toISOString().split('T')[0]
     tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1)
   })
   let tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
@@ -408,26 +409,26 @@ export default function PortalCliente() {
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie data={[
+                      { name: "Nuevos", value: presNuevos, color: "#f59e0b" },
                       { name: "Interesados", value: presInteresados, color: "#10b981" },
-                      { name: "En análisis", value: presNuevos, color: "#f59e0b" },
                       { name: "Acompañamiento", value: presAcompanamiento, color: "#3b82f6" }
                     ]} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2} dataKey="value" stroke="none">
-                      <Cell fill="#10b981" /><Cell fill="#f59e0b" /><Cell fill="#3b82f6" />
+                      <Cell fill="#f59e0b" /><Cell fill="#10b981" /><Cell fill="#3b82f6" />
                     </Pie>
                     <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [fmt(value), 'Presupuesto']} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
               <div className="mt-3 space-y-1.5 text-[11px]">
+                <div className="flex justify-between"><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-amber-500"/><span className="text-gray-600 dark:text-gray-400">Nuevos</span></div><span className="text-gray-900 dark:text-white font-mono">{fmt(presNuevos)}</span></div>
                 <div className="flex justify-between"><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"/><span className="text-gray-600 dark:text-gray-400">Interesados</span></div><span className="text-gray-900 dark:text-white font-mono">{fmt(presInteresados)}</span></div>
-                <div className="flex justify-between"><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-amber-500"/><span className="text-gray-600 dark:text-gray-400">En análisis</span></div><span className="text-gray-900 dark:text-white font-mono">{fmt(presNuevos)}</span></div>
                 <div className="flex justify-between"><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"/><span className="text-gray-600 dark:text-gray-400">Acompañamiento</span></div><span className="text-gray-900 dark:text-white font-mono">{fmt(presAcompanamiento)}</span></div>
                 <div className="border-t border-gray-200 dark:border-gray-800 pt-2 mt-1"><div className="flex justify-between font-semibold"><span>Total potencial</span><span className="text-emerald-600 dark:text-emerald-400">{fmt(presTotal)}</span></div></div>
               </div>
             </div>
           </div>
 
-          {/* COLUMNA CENTRAL */}
+          {/* COLUMNA CENTRAL (sin cambios en lógica de tarjetas) */}
           <div className="lg:col-span-6 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2"><h2 className="text-gray-900 dark:text-white font-bold text-lg flex items-center gap-2"><Zap size={16} className="text-emerald-600"/>{tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : tab === "acompanamiento" ? "Acompañamiento" : "Descartados"}</h2>{(tab === "nuevos" || tab === "interesado") && (<button onClick={() => setFiltroPanel(!filtroPanel)} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${filtrosActivos > 0 ? "bg-blue-600 text-white" : "bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}><Filter size={10}/> Filtrar {filtrosActivos > 0 && `(${filtrosActivos})`}</button>)}</div>
@@ -447,7 +448,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO (PROCESOS CON en_acompanamiento = true) */}
+            {/* ACOMPAÑAMIENTO (igual que antes) */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {acompanamiento.length === 0 ? (
@@ -553,7 +554,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA NUEVOS / INTERESES (procesos SIN en_acompanamiento) */}
+            {/* NUEVOS / INTERESES (sin cambios) */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
@@ -596,7 +597,7 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA (sin cambios) */}
+          {/* COLUMNA DERECHA - MÉTRICAS Y PROCESOS GANADOS */}
           <div className="lg:col-span-3 space-y-5">
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
@@ -604,8 +605,35 @@ export default function PortalCliente() {
                 {[...procesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}
               </div>
             </div>
-            {topEntidades.length > 0 && (<div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-amber-500"/>Top entidades por presupuesto</h2><div className="space-y-2">{topEntidades.map((e, i) => (<div key={i} className="flex justify-between items-center text-xs"><span className="truncate w-32 text-gray-700 dark:text-gray-300">{e.name}</span><span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(e.total)}</span></div>))}</div></div>)}
-            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2><div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{procesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div></div>
+
+            {topEntidades.length > 0 && (
+              <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
+                <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-amber-500"/>Top entidades por presupuesto</h2>
+                <div className="space-y-2">{topEntidades.map((e, i) => (<div key={i} className="flex justify-between items-center text-xs"><span className="truncate w-32 text-gray-700 dark:text-gray-300">{e.name}</span><span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(e.total)}</span></div>))}</div>
+              </div>
+            )}
+
+            {/* NUEVO: Procesos Ganados */}
+            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
+              <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <Trophy size={12} className="text-yellow-500"/> Procesos Ganados
+              </h2>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-600 dark:text-gray-400">Cantidad</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">{ganadosCount}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-600 dark:text-gray-400">Presupuesto total</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(ganadosMonto)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
+              <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2>
+              <div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{procesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div>
+            </div>
             {cliente?.drive_url && (<a href={cliente.drive_url} target="_blank" rel="noreferrer" className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-4 flex items-center gap-3 hover:shadow-sm transition-all"><FolderOpen size={18} className="text-blue-600" /><div><p className="text-[12px] font-medium text-gray-900 dark:text-white">Google Drive</p><p className="text-[10px] text-gray-500">Mis documentos</p></div></a>)}
           </div>
         </div>
