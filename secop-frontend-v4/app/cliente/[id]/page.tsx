@@ -87,8 +87,8 @@ export default function PortalCliente() {
   const id = params.id as string
 
   const [cliente, setCliente] = useState<Cliente | null>(null)
-  const [procesos, setProcesos] = useState<Proceso[]>([])
-  const [todosProcesos, setTodosProcesos] = useState<Proceso[]>([])
+  const [procesos, setProcesos] = useState<Proceso[]>([])      // ← para pestañas Nuevos/Intereses (excluye los que tienen solicitud activa)
+  const [todosProcesos, setTodosProcesos] = useState<Proceso[]>([]) // ← todos (para gráficos y detalles de acompañamiento)
   const [descartados, setDescartados] = useState<Proceso[]>([])
   const [solicitudes, setSolicitudes] = useState<SolicitudAcompanamiento[]>([])
   const [loading, setLoading] = useState(true)
@@ -145,13 +145,31 @@ export default function PortalCliente() {
     const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id)
     setSolicitudes(sol || [])
 
+    // IDs de procesos con solicitud activa (pendiente o en_proceso) para excluir de la lista "procesos"
     const idsExcluir = (sol || []).filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso').map(s => s.proceso_id).filter(Boolean) as string[]
+
     const hoy = new Date().toISOString()
-    const { data: allProcesos } = await supabase.from("procesos").select("*").eq("cliente_id", id).neq("estado", "descartado").or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`).order("fecha_oferta", { ascending: true })
+    // Obtener TODOS los procesos (sin exclusión) para gráficos y para las tarjetas de acompañamiento
+    const { data: allProcesos } = await supabase
+      .from("procesos")
+      .select("*")
+      .eq("cliente_id", id)
+      .neq("estado", "descartado")
+      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
+      .order("fecha_oferta", { ascending: true })
     setTodosProcesos(allProcesos || [])
 
-    let query = supabase.from("procesos").select("*").eq("cliente_id", id).neq("estado", "descartado").or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`).order("fecha_oferta", { ascending: true })
-    if (idsExcluir.length > 0) query = query.not("id", "in", `(${idsExcluir.join(",")})`)
+    // Obtener procesos excluyendo los que tienen solicitud activa (para Nuevos/Intereses)
+    let query = supabase
+      .from("procesos")
+      .select("*")
+      .eq("cliente_id", id)
+      .neq("estado", "descartado")
+      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
+      .order("fecha_oferta", { ascending: true })
+    if (idsExcluir.length > 0) {
+      query = query.not("id", "in", `(${idsExcluir.join(",")})`)
+    }
     const { data: p } = await query
     setProcesos(p || [])
 
@@ -172,18 +190,19 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: true }))
     await supabase.from("procesos").update({ estado: "interesado", etapa_seguimiento: 0 }).eq("id", procesoId)
     await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "interesado" }])
+    // Actualizar ambos estados locales
     setProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
     setTodosProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
     mostrarToast("✓ Interés registrado", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // ======================= ENVIAR A ACOMPAÑAMIENTO (CORREGIDO - NO ELIMINA DE todosProcesos) =======================
+  // ======================= ENVIAR A ACOMPAÑAMIENTO =======================
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
     const proc = todosProcesos.find(x => x.id === procesoId)
     if (!proc) {
-      console.error("❌ No se encontró el proceso en todosProcesos", procesoId)
+      console.error("❌ No se encontró el proceso", procesoId)
       mostrarToast("Error: proceso no encontrado", "error")
       return
     }
@@ -211,8 +230,8 @@ export default function PortalCliente() {
       return
     }
 
-    // Actualización local: eliminar SOLO de "procesos" (para que desaparezca de Nuevos/Intereses)
-    // pero NO de todosProcesos (para mantener gráficos y detalles)
+    // Actualización local: eliminar el proceso de `procesos` (para que desaparezca de Nuevos/Intereses)
+    // pero mantenerlo en `todosProcesos` (para gráficos y detalles de acompañamiento)
     setProcesos(prev => prev.filter(p => p.id !== procesoId))
     setSolicitudes(prev => [newSolicitud, ...prev])
     setTab("acompanamiento")
@@ -220,9 +239,10 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // ======================= DESCARTAR (CORREGIDO) =======================
+  // ======================= DESCARTAR =======================
   async function descartar(procesoId: string) {
     setProcesoADescartar(null)
+    // Buscar el proceso en `procesos` (puede estar ahí si aún no se envió a acompañamiento)
     let p = procesos.find(x => x.id === procesoId)
     if (!p) p = todosProcesos.find(x => x.id === procesoId)
     if (!p) {
@@ -280,14 +300,16 @@ export default function PortalCliente() {
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
   function limpiarFiltros() { setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("") }
 
-  // Datos para gráficos
-  const nuevos = todosProcesos.filter(p => p.estado === "nuevo")
-  const interesados = todosProcesos.filter(p => p.estado === "interesado")
+  // ========== DATOS PARA PESTAÑAS (usando `procesos`) ==========
+  const nuevos = procesos.filter(p => p.estado === "nuevo")
+  const interesados = procesos.filter(p => p.estado === "interesado")
+
+  // ========== DATOS PARA GRÁFICOS (usando `todosProcesos`) ==========
   const solicitudesActivas = solicitudes.filter(s => s.estado === "pendiente" || s.estado === "en_proceso")
   const idsEnAcompanamiento = solicitudesActivas.map(s => s.proceso_id).filter(Boolean)
   const presAcompanamiento = todosProcesos.filter(p => idsEnAcompanamiento.includes(p.id)).reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
-  const presInteresados = interesados.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
-  const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
+  const presInteresados = todosProcesos.filter(p => p.estado === "interesado").reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
+  const presAnalisis = todosProcesos.filter(p => p.estado === "nuevo").reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
   // Tendencia (últimos 30 días)
@@ -316,9 +338,9 @@ export default function PortalCliente() {
   todosProcesos.forEach(p => { if (p.entidad) entidadMap.set(p.entidad, (entidadMap.get(p.entidad) || 0) + Number(p.presupuesto || 0)) })
   const topEntidades = Array.from(entidadMap.entries()).map(([name, total]) => ({ name, total })).sort((a,b) => b.total - a.total).slice(0,5)
 
-  const deptos = [...new Set(todosProcesos.map(p => p.departamento).filter(Boolean))].sort()
-  const entidades = [...new Set(todosProcesos.map(p => p.entidad).filter(Boolean))].sort()
-  const modalidades = [...new Set(todosProcesos.map(p => p.modalidad).filter(Boolean))].sort()
+  const deptos = [...new Set(procesos.map(p => p.departamento).filter(Boolean))].sort()
+  const entidades = [...new Set(procesos.map(p => p.entidad).filter(Boolean))].sort()
+  const modalidades = [...new Set(procesos.map(p => p.modalidad).filter(Boolean))].sort()
   const listaBase = tab === "nuevos" ? nuevos : tab === "interesado" ? interesados : []
   const listaActual = listaBase.filter(p => {
     if (fDepto && p.departamento !== fDepto) return false
@@ -380,7 +402,7 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - GRÁFICOS (sin cambios) */}
+          {/* COLUMNA IZQUIERDA - GRÁFICOS (usando todosProcesos) */}
           <div className="lg:col-span-3 space-y-5">
             {tendenciaData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
@@ -568,7 +590,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* NUEVOS / INTERESES (sin cambios) */}
+            {/* NUEVOS / INTERESES (usando la lista `procesos` que ya excluye los enviados a acompañamiento) */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
