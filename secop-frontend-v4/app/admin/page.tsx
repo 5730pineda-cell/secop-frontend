@@ -48,7 +48,7 @@ function initials(nombre: string) {
   return nombre.split(" ").map(w => w[0]).join("").substring(0,2).toUpperCase()
 }
 
-// ---------- COMPONENTES UI AUXILIARES ----------
+// ---------- COMPONENTES AUXILIARES ----------
 function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
@@ -60,7 +60,6 @@ function CloseBtn({ onClose }: { onClose: () => void }) {
   return <button onClick={onClose} className="w-8 h-8 rounded-lg bg-[#1c2028] border border-[#252932] text-[#525a68] hover:text-white transition-all">✕</button>
 }
 
-// TimelineAdmin (para procesos normales)
 function TimelineAdmin({ procesoId, etapa, onUpdate }: { procesoId: string; etapa: number; onUpdate: (id: string, i: number) => void }) {
   const [updating, setUpdating] = useState(false)
   const idx = typeof etapa === "number" ? etapa : 0
@@ -90,8 +89,10 @@ function TimelineAdmin({ procesoId, etapa, onUpdate }: { procesoId: string; etap
   )
 }
 
-// ---------- MODALES (simplificados pero funcionales) ----------
+// ---------- MODALES (Placeholders - reemplaza con los tuyos) ----------
 function ModalNuevoCliente({ onClose, onCreated, prefillData }: { onClose: () => void; onCreated: (c: Cliente) => void; prefillData?: Partial<Cliente> }) {
+  // Este es un placeholder. Reemplázalo con tu modal real que ya funciona.
+  // Por ahora crea un cliente simple para que no falle el build.
   const [form, setForm] = useState({
     id: prefillData?.id || "", nombre: prefillData?.nombre || "", usuario: prefillData?.usuario || "", password_hash: "",
     descripcion_negocio: prefillData?.descripcion_negocio || "", palabras_clave: "", palabras_excluidas: "",
@@ -158,15 +159,16 @@ function ModalNuevoCliente({ onClose, onCreated, prefillData }: { onClose: () =>
   )
 }
 
+// Placeholder para editar cliente (reemplaza con tu modal real)
 function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente; onClose: () => void; onUpdated: (c: Cliente) => void }) {
-  // Similar al anterior pero con datos del cliente, lo simplifico para no alargar.
-  // Puedes copiar el que ya tenías funcionando.
-  return null // Placeholder, reemplazar por el modal real
+  // Implementación mínima para evitar error. Reemplázala con tu modal completo.
+  return null;
 }
 
+// Placeholder para proceso manual (reemplaza con tu modal real)
 function ModalProcesoManual({ clientes, onClose, onCreated }: { clientes: Cliente[]; onClose: () => void; onCreated: (p: Proceso) => void }) {
-  // Ídem. Copia tu modal existente.
-  return null
+  // Implementación mínima para evitar error. Reemplázala con tu modal completo.
+  return null;
 }
 
 function ModalEliminar({ nombre, onClose, onConfirm, loading }: { nombre: string; onClose: () => void; onConfirm: () => void; loading: boolean }) {
@@ -182,7 +184,7 @@ function ModalEliminar({ nombre, onClose, onConfirm, loading }: { nombre: string
   )
 }
 
-// ---------- COMPONENTE PRINCIPAL ----------
+// ---------- COMPONENTE PRINCIPAL ADMIN ----------
 export default function AdminPage() {
   const router = useRouter()
   const [authed, setAuthed] = useState(false)
@@ -224,7 +226,8 @@ export default function AdminPage() {
   const [notaResultadoTemp, setNotaResultadoTemp] = useState("")
 
   useEffect(() => {
-    if (sessionStorage.getItem("secop_admin") === btoa(ADMIN_PASS)) { setAuthed(true); cargar() }
+    const stored = sessionStorage.getItem("secop_admin")
+    if (stored === btoa(ADMIN_PASS)) { setAuthed(true); cargar() }
     else setLoading(false)
   }, [])
 
@@ -253,6 +256,16 @@ export default function AdminPage() {
     const nuevosFeed = (f || []).filter(fb => new Date(fb.created_at) > ayer && (fb.accion === "interesado" || fb.accion === "enviado_sofia"))
     setNotificaciones(nuevosFeed)
     setLoading(false)
+  }
+
+  async function handleLogin() {
+    if (pass === ADMIN_PASS) {
+      sessionStorage.setItem("secop_admin", btoa(ADMIN_PASS))
+      setAuthed(true)
+      await cargar()
+    } else {
+      setLoginErr(true)
+    }
   }
 
   function mostrarToast(msg: string) { setToast(msg); setTimeout(() => setToast(""), 3500) }
@@ -394,21 +407,21 @@ export default function AdminPage() {
     return ultimos7
   }, [procesos, feedback])
 
-  // Login y loading
   if (!authed) {
     return (
       <div className="min-h-screen bg-[#0a0c10] flex items-center justify-center">
         <div className="bg-[#111318] border border-[#252932] rounded-2xl p-8 w-96 text-center">
           <span className="font-display text-3xl font-black"><span className="text-white">sof</span><span className="text-[#3b82f6]">ia</span></span>
           <p className="text-[10px] text-[#525a68] mt-1">ADMIN · OC CONSULTORES</p>
-          <input type="password" placeholder="Contraseña admin" value={pass} onChange={e=>{setPass(e.target.value);setLoginErr(false)}} onKeyDown={e=>e.key==='Enter'&&login()} className="w-full p-3 mt-4 bg-[#1c2028] border border-[#252932] rounded text-white" />
+          <input type="password" placeholder="Contraseña admin" value={pass} onChange={e=>{setPass(e.target.value);setLoginErr(false)}} onKeyDown={e=>e.key==='Enter'&&handleLogin()} className="w-full p-3 mt-4 bg-[#1c2028] border border-[#252932] rounded text-white" />
           {loginErr && <p className="text-red-500 text-xs mt-2">Contraseña incorrecta</p>}
-          <button onClick={() => { if (pass === ADMIN_PASS) { sessionStorage.setItem("secop_admin", btoa(ADMIN_PASS)); setAuthed(true); cargar() } else setLoginErr(true) }} className="w-full mt-4 p-2 bg-[#3b82f6] rounded text-white font-bold">Entrar</button>
+          <button onClick={handleLogin} className="w-full mt-4 p-2 bg-[#3b82f6] rounded text-white font-bold">Entrar</button>
           <button onClick={()=>router.push("/login")} className="w-full mt-2 p-2 border border-[#252932] rounded text-[#525a68] text-sm">← Portal clientes</button>
         </div>
       </div>
     )
   }
+
   if (loading) return <div className="min-h-screen bg-[#0a0c10] flex items-center justify-center"><div className="w-8 h-8 border-2 border-[#3b82f6] border-t-transparent rounded-full animate-spin"></div></div>
 
   return (
@@ -497,7 +510,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB CLIENTES (simplificado, puedes copiar el original) */}
+        {/* TAB CLIENTES (simplificado pero funcional) */}
         {tab === "clientes" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {clientesFilt.map(c=>(
@@ -512,11 +525,11 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB FEEDBACK (simplificado) */}
+        {/* TAB FEEDBACK */}
         {tab === "feedback" && (
           <div className="bg-[#15181f] border border-[#252932] rounded-xl overflow-auto">
-            <table className="w-full text-sm"><thead className="border-b border-[#252932]"><tr>{["Cliente","Proceso","Acción","Nota","Fecha"].map(h => <th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>)}</tr></thead>
-            <tbody>{feedback.slice(0,100).map(f => { const proc = procesos.find(p => p.id === f.proceso_id); return <tr key={f.id} className="border-b border-[#1c2028]"><td className="p-2 text-[11px] text-[#60a5fa]">{f.cliente_id || "—"}</td><td className="p-2 text-[10px] max-w-40 truncate">{proc?.entidad || f.proceso_id}</td><td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>{f.accion}</span></td><td className="p-2 text-[11px]">{f.nota || "—"}</td><td className="p-2 text-[10px] text-[#525a68]">{new Date(f.created_at).toLocaleDateString()}</td></tr> })}</tbody></table>
+            <table className="w-full text-sm"><thead className="border-b border-[#252932]"><tr>{["Cliente","Proceso","Acción","Nota","Fecha"].map(h => <th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>)}</thead>
+            <tbody>{feedback.slice(0,100).map(f => { const proc = procesos.find(p => p.id === f.proceso_id); return <tr key={f.id} className="border-b border-[#1c2028]"><td className="p-2 text-[11px] text-[#60a5fa]">{f.cliente_id || "—"}</td><td className="p-2 text-[10px] max-w-40 truncate">{proc?.entidad || f.proceso_id}</td><td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>{f.accion}</span></td><td className="p-2 text-[11px]">{f.nota || "—"}</td><td className="p-2 text-[10px] text-[#525a68]">{new Date(f.created_at).toLocaleDateString()}</td>}</tr>})}</tbody><tr>
           </div>
         )}
 
