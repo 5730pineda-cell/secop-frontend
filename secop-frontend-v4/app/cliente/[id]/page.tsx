@@ -138,20 +138,43 @@ export default function PortalCliente() {
     if (ce || !c) { setError("Cliente no encontrado."); setLoading(false); return }
     setCliente(c)
 
+    // Limpiar vencidos
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "nuevo").lt("fecha_oferta", new Date().toISOString())
     const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
+    // Obtener todas las solicitudes
     const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id)
     setSolicitudes(sol || [])
 
-    const idsExcluir = (sol || []).filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso').map(s => s.proceso_id).filter(Boolean) as string[]
+    // IDs de procesos con solicitud activa (pendiente o en_proceso) para excluir
+    const idsExcluir = (sol || [])
+      .filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso')
+      .map(s => s.proceso_id)
+      .filter(Boolean) as string[]
+
     const hoy = new Date().toISOString()
-    const { data: allProcesos } = await supabase.from("procesos").select("*").eq("cliente_id", id).neq("estado", "descartado").or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`).order("fecha_oferta", { ascending: true })
+    // Todos los procesos (para gráficos y acompañamiento)
+    const { data: allProcesos } = await supabase
+      .from("procesos")
+      .select("*")
+      .eq("cliente_id", id)
+      .neq("estado", "descartado")
+      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
+      .order("fecha_oferta", { ascending: true })
     setTodosProcesos(allProcesos || [])
 
-    let query = supabase.from("procesos").select("*").eq("cliente_id", id).neq("estado", "descartado").or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`).order("fecha_oferta", { ascending: true })
-    if (idsExcluir.length > 0) query = query.not("id", "in", `(${idsExcluir.join(",")})`)
+    // Procesos excluyendo los que tienen solicitud activa (para Nuevos/Intereses)
+    let query = supabase
+      .from("procesos")
+      .select("*")
+      .eq("cliente_id", id)
+      .neq("estado", "descartado")
+      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
+      .order("fecha_oferta", { ascending: true })
+    if (idsExcluir.length > 0) {
+      query = query.not("id", "in", `(${idsExcluir.join(",")})`)
+    }
     const { data: p } = await query
     setProcesos(p || [])
 
@@ -178,12 +201,12 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // ======================= FUNCIÓN ENVIAR A ACOMPAÑAMIENTO (SIN RECARGA) =======================
+  // ======================= ENVIAR A ACOMPAÑAMIENTO (CORREGIDO) =======================
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
     const proc = todosProcesos.find(x => x.id === procesoId)
     if (!proc) {
-      console.error("No se encontró el proceso en todosProcesos", procesoId)
+      console.error("❌ No se encontró el proceso en todosProcesos", procesoId)
       mostrarToast("Error: proceso no encontrado", "error")
       return
     }
@@ -206,45 +229,49 @@ export default function PortalCliente() {
       .single()
 
     if (error) {
-      console.error("Error insertando solicitud:", error)
+      console.error("❌ Error insertando solicitud:", error)
       mostrarToast("Error: " + error.message, "error")
       setSaving(prev => ({ ...prev, [procesoId]: false }))
       return
     }
 
-    console.log("Solicitud creada:", newSolicitud)
+    console.log("✅ Solicitud creada:", newSolicitud)
 
-    // ACTUALIZACIÓN LOCAL OPTIMISTA (sin esperar recarga)
-    // 1. Eliminar el proceso de las listas activas
-    setProcesos(prev => prev.filter(p => p.id !== procesoId))
-    setTodosProcesos(prev => prev.filter(p => p.id !== procesoId))
-    // 2. Agregar la nueva solicitud al inicio de solicitudes
+    // ACTUALIZACIÓN LOCAL OPTIMISTA (eliminar proceso de todas las listas activas)
+    setProcesos(prev => {
+      const filtered = prev.filter(p => p.id !== procesoId)
+      console.log("📦 procesos después de eliminar:", filtered.length)
+      return filtered
+    })
+    setTodosProcesos(prev => {
+      const filtered = prev.filter(p => p.id !== procesoId)
+      console.log("📦 todosProcesos después de eliminar:", filtered.length)
+      return filtered
+    })
     setSolicitudes(prev => [newSolicitud, ...prev])
-    // 3. Cambiar a la pestaña de acompañamiento
     setTab("acompanamiento")
     mostrarToast("Solicitud enviada. El proceso ahora está en Acompañamiento.", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
 
-    // IMPORTANTE: NO llamar a cargar() aquí, porque sobrescribiría los cambios locales.
-    // Si quieres sincronizar en segundo plano más tarde, hazlo con un setTimeout largo.
-    // setTimeout(() => cargar().catch(console.error), 2000);
+    // NO llamar a cargar() para no sobrescribir
   }
 
-  // ======================= FUNCIÓN DESCARTAR (SIN RECARGA) =======================
+  // ======================= DESCARTAR (CORREGIDO) =======================
   async function descartar(procesoId: string) {
     setProcesoADescartar(null)
-    const p = procesos.find(x => x.id === procesoId)
+    // Buscar el proceso tanto en procesos como en todosProcesos (por si ya no está en procesos)
+    let p = procesos.find(x => x.id === procesoId)
+    if (!p) p = todosProcesos.find(x => x.id === procesoId)
     if (!p) {
-      console.warn("No se encontró el proceso en procesos para descartar", procesoId)
+      console.warn("⚠️ No se encontró el proceso para descartar", procesoId)
+      mostrarToast("El proceso ya no está disponible", "error")
       return
     }
     setSaliendo(prev => ({ ...prev, [procesoId]: true }))
 
-    // Actualizar BD
     await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
     await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
 
-    // Mover a descartados y eliminar de activas
     const procesoDescartado = { ...p, estado: "descartado" }
     setDescartados(prev => [procesoDescartado, ...prev])
     setProcesos(prev => prev.filter(x => x.id !== procesoId))
@@ -300,6 +327,7 @@ export default function PortalCliente() {
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
+  // Tendencia (últimos 30 días)
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = todosProcesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
@@ -356,6 +384,7 @@ export default function PortalCliente() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-sans antialiased transition-colors duration-300">
+      {/* HEADER (sin cambios, igual que antes) */}
       <header className="sticky top-0 z-40 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800">
         <div className="flex items-center justify-between px-6 py-3 max-w-[1600px] mx-auto">
           <div className="flex items-center gap-3">
@@ -389,7 +418,7 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - GRÁFICOS */}
+          {/* COLUMNA IZQUIERDA - GRÁFICOS (sin cambios, igual que antes) */}
           <div className="lg:col-span-3 space-y-5">
             {tendenciaData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
@@ -450,8 +479,9 @@ export default function PortalCliente() {
             </div>
           </div>
 
-          {/* COLUMNA CENTRAL */}
+          {/* COLUMNA CENTRAL - PROCESOS (solo la parte de ACOMPAÑAMIENTO, el resto es igual) */}
           <div className="lg:col-span-6 space-y-4">
+            {/* Cabecera y filtros (igual que antes) */}
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2"><h2 className="text-gray-900 dark:text-white font-bold text-lg flex items-center gap-2"><Zap size={16} className="text-emerald-600"/>{tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : tab === "acompanamiento" ? "Mis Solicitudes de Acompañamiento" : "Descartados"}</h2>{(tab === "nuevos" || tab === "interesado") && (<button onClick={() => setFiltroPanel(!filtroPanel)} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${filtrosActivos > 0 ? "bg-blue-600 text-white" : "bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}><Filter size={10}/> Filtrar {filtrosActivos > 0 && `(${filtrosActivos})`}</button>)}</div>
               <div className="text-[10px] text-gray-500 font-mono">{tab === "acompanamiento" ? `${solicitudes.length} solicitud(es)` : `${listaActual.length} oportunidad(es) · ${fmt(listaActual.reduce((s,p)=>s+Number(p.presupuesto||0),0))}`}</div>
@@ -470,7 +500,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* ACOMPAÑAMIENTO */}
+            {/* ACOMPAÑAMIENTO (mismo código que antes, pero los datos ahora vendrán con proceso_id correcto) */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
@@ -515,7 +545,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* NUEVOS / INTERESES */}
+            {/* NUEVOS / INTERESES (igual que antes) */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
@@ -544,7 +574,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* DESCARTADOS */}
+            {/* DESCARTADOS (igual que antes) */}
             {tab === "descartados" && (
               <div className="space-y-3">
                 {descartados.length === 0 ? (<div className="text-center py-16 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-5xl mb-4">🗑</div><div className="text-[15px] font-semibold text-gray-900 dark:text-white mb-2">Sin procesos descartados</div><div className="text-[13px] text-gray-500">Se eliminan automáticamente después de 30 días.</div></div>) : (
@@ -554,7 +584,7 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA */}
+          {/* COLUMNA DERECHA (igual que antes) */}
           <div className="lg:col-span-3 space-y-5">
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
