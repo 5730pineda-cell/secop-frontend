@@ -49,10 +49,14 @@ export interface Proceso {
   fecha_etapa_4?: string | null
   fecha_informe_evaluacion?: string | null
 
-  // NUEVAS FECHAS CLAVE PARA ADMIN (informes)
+  // Fechas clave para admin (informes)
   fecha_informe_preliminar?: string | null
   fecha_traslado_subsanacion?: string | null
   fecha_informe_definitivo?: string | null
+
+  // ⭐ NUEVAS FECHAS OPCIONALES (manifestación de interés y presentación de oferta)
+  fecha_manifestacion_interes?: string | null
+  fecha_presentacion_oferta?: string | null
 
   resultado_final?: 'ganado' | 'perdido' | 'desierto' | null
   nota_resultado?: string | null
