@@ -131,7 +131,8 @@ export default function PortalCliente() {
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
     // Obtener solicitudes activas (pendiente o en_proceso) para excluir sus procesos
-    const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("proceso_id, estado").eq("cliente_id", id)
+    // ✅ CORREGIDO: ahora seleccionamos todas las columnas (*)
+    const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id)
     setSolicitudes(sol || [])
     const idsExcluir = (sol || [])
       .filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso')
