@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import type { Cliente, Proceso, Comentario, SolicitudAcompanamiento } from "@/types"
+import type { Cliente, Proceso, Comentario } from "@/types"
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   LineChart, Line, Area
@@ -87,10 +87,8 @@ export default function PortalCliente() {
   const id = params.id as string
 
   const [cliente, setCliente] = useState<Cliente | null>(null)
-  const [procesos, setProcesos] = useState<Proceso[]>([])      // ← para pestañas Nuevos/Intereses (excluye los que tienen solicitud activa)
-  const [todosProcesos, setTodosProcesos] = useState<Proceso[]>([]) // ← todos (para gráficos y detalles de acompañamiento)
+  const [procesos, setProcesos] = useState<Proceso[]>([])
   const [descartados, setDescartados] = useState<Proceso[]>([])
-  const [solicitudes, setSolicitudes] = useState<SolicitudAcompanamiento[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState("nuevos")
@@ -109,9 +107,9 @@ export default function PortalCliente() {
   const [fPresMax, setFPresMax] = useState("")
   const [fTexto, setFTexto] = useState("")
   const [searchTerm, setSearchTerm] = useState("")
-  const [comentariosSolicitud, setComentariosSolicitud] = useState<Record<string, Comentario[]>>({})
-  const [nuevoComentarioSolicitud, setNuevoComentarioSolicitud] = useState<Record<string, string>>({})
-  const [enviandoComentarioSolicitud, setEnviandoComentarioSolicitud] = useState<Record<string, boolean>>({})
+  const [comentariosProceso, setComentariosProceso] = useState<Record<string, Comentario[]>>({})
+  const [nuevoComentario, setNuevoComentario] = useState<Record<string, string>>({})
+  const [enviandoComentario, setEnviandoComentario] = useState<Record<string, boolean>>({})
   const [darkMode, setDarkMode] = useState(false)
 
   useEffect(() => {
@@ -138,42 +136,26 @@ export default function PortalCliente() {
     if (ce || !c) { setError("Cliente no encontrado."); setLoading(false); return }
     setCliente(c)
 
+    // Limpiar vencidos
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "nuevo").lt("fecha_oferta", new Date().toISOString())
     const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
-    const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id)
-    setSolicitudes(sol || [])
-
-    // IDs de procesos con solicitud activa (pendiente o en_proceso) para excluir de la lista "procesos"
-    const idsExcluir = (sol || []).filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso').map(s => s.proceso_id).filter(Boolean) as string[]
-
-    const hoy = new Date().toISOString()
-    // Obtener TODOS los procesos (sin exclusión) para gráficos y para las tarjetas de acompañamiento
-    const { data: allProcesos } = await supabase
+    // Cargar todos los procesos (incluidos los de acompañamiento)
+    const { data: procesosData } = await supabase
       .from("procesos")
       .select("*")
       .eq("cliente_id", id)
       .neq("estado", "descartado")
-      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
       .order("fecha_oferta", { ascending: true })
-    setTodosProcesos(allProcesos || [])
+    setProcesos(procesosData || [])
 
-    // Obtener procesos excluyendo los que tienen solicitud activa (para Nuevos/Intereses)
-    let query = supabase
+    const { data: desc } = await supabase
       .from("procesos")
       .select("*")
       .eq("cliente_id", id)
-      .neq("estado", "descartado")
-      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
-      .order("fecha_oferta", { ascending: true })
-    if (idsExcluir.length > 0) {
-      query = query.not("id", "in", `(${idsExcluir.join(",")})`)
-    }
-    const { data: p } = await query
-    setProcesos(p || [])
-
-    const { data: desc } = await supabase.from("procesos").select("*").eq("cliente_id", id).eq("estado", "descartado").order("updated_at", { ascending: false })
+      .eq("estado", "descartado")
+      .order("updated_at", { ascending: false })
     setDescartados(desc || [])
 
     setLoading(false)
@@ -190,76 +172,43 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: true }))
     await supabase.from("procesos").update({ estado: "interesado", etapa_seguimiento: 0 }).eq("id", procesoId)
     await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "interesado" }])
-    // Actualizar ambos estados locales
     setProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
-    setTodosProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
     mostrarToast("✓ Interés registrado", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // ======================= ENVIAR A ACOMPAÑAMIENTO =======================
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
-    const proc = todosProcesos.find(x => x.id === procesoId)
-    if (!proc) {
-      console.error("❌ No se encontró el proceso", procesoId)
-      mostrarToast("Error: proceso no encontrado", "error")
-      return
-    }
     setSaving(prev => ({ ...prev, [procesoId]: "acompanamiento" }))
-
-    const { data: newSolicitud, error } = await supabase
-      .from("solicitudes_acompanamiento")
-      .insert({
-        cliente_id: id,
-        proceso_id: procesoId,
-        empresa: cliente?.nombre || "Cliente",
-        numero_proceso: proc.referencia,
-        enlace: proc.url || "",
-        observaciones: `Solicitud de acompañamiento.\nEntidad: ${proc.entidad}\nPresupuesto: ${fmt(proc.presupuesto)}`,
-        estado: "pendiente",
-        etapa_actual: 0
+    const { error } = await supabase
+      .from("procesos")
+      .update({
+        en_acompanamiento: true,
+        estado_acompanamiento: 'pendiente',
+        acompanamiento_creado_en: new Date().toISOString(),
+        etapa_seguimiento: 0
       })
-      .select()
-      .single()
-
+      .eq("id", procesoId)
     if (error) {
-      console.error("❌ Error insertando solicitud:", error)
       mostrarToast("Error: " + error.message, "error")
-      setSaving(prev => ({ ...prev, [procesoId]: false }))
-      return
+    } else {
+      setProcesos(prev => prev.map(p => p.id === procesoId ? { ...p, en_acompanamiento: true, estado_acompanamiento: 'pendiente', acompanamiento_creado_en: new Date().toISOString(), etapa_seguimiento: 0 } : p))
+      mostrarToast("Proceso enviado a acompañamiento", "ok")
+      setTab("acompanamiento")
     }
-
-    // Actualización local: eliminar el proceso de `procesos` (para que desaparezca de Nuevos/Intereses)
-    // pero mantenerlo en `todosProcesos` (para gráficos y detalles de acompañamiento)
-    setProcesos(prev => prev.filter(p => p.id !== procesoId))
-    setSolicitudes(prev => [newSolicitud, ...prev])
-    setTab("acompanamiento")
-    mostrarToast("Solicitud enviada. El proceso ahora está en Acompañamiento.", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // ======================= DESCARTAR =======================
   async function descartar(procesoId: string) {
     setProcesoADescartar(null)
-    // Buscar el proceso en `procesos` (puede estar ahí si aún no se envió a acompañamiento)
-    let p = procesos.find(x => x.id === procesoId)
-    if (!p) p = todosProcesos.find(x => x.id === procesoId)
-    if (!p) {
-      console.warn("⚠️ No se encontró el proceso para descartar", procesoId)
-      mostrarToast("El proceso ya no está disponible", "error")
-      return
-    }
+    const p = procesos.find(x => x.id === procesoId)
+    if (!p) return
     setSaliendo(prev => ({ ...prev, [procesoId]: true }))
-
     await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
     await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
-
     const procesoDescartado = { ...p, estado: "descartado" }
     setDescartados(prev => [procesoDescartado, ...prev])
     setProcesos(prev => prev.filter(x => x.id !== procesoId))
-    setTodosProcesos(prev => prev.filter(x => x.id !== procesoId))
-
     setTimeout(() => setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n }), 320)
     mostrarToast("Proceso descartado", "info")
   }
@@ -270,51 +219,49 @@ export default function PortalCliente() {
     if (p) {
       const restaurado = { ...p, estado: "nuevo" }
       setProcesos(prev => [restaurado, ...prev])
-      setTodosProcesos(prev => [restaurado, ...prev])
     }
     setDescartados(prev => prev.filter(x => x.id !== procesoId))
     mostrarToast("Proceso restaurado", "ok")
     setTab("nuevos")
   }
 
-  async function cargarComentariosSolicitud(solicitudId: string) {
-    const { data } = await supabase.from("comentarios").select("*").eq("solicitud_id", solicitudId).order("created_at", { ascending: true })
-    if (data) setComentariosSolicitud(prev => ({ ...prev, [solicitudId]: data }))
+  async function cargarComentarios(procesoId: string) {
+    const { data } = await supabase.from("comentarios").select("*").eq("proceso_id", procesoId).order("created_at", { ascending: true })
+    if (data) setComentariosProceso(prev => ({ ...prev, [procesoId]: data }))
   }
 
-  async function enviarComentarioSolicitud(solicitudId: string) {
-    const texto = nuevoComentarioSolicitud[solicitudId]?.trim()
+  async function enviarComentario(procesoId: string) {
+    const texto = nuevoComentario[procesoId]?.trim()
     if (!texto) { mostrarToast("Escribe un comentario", "error"); return }
-    setEnviandoComentarioSolicitud(prev => ({ ...prev, [solicitudId]: true }))
+    setEnviandoComentario(prev => ({ ...prev, [procesoId]: true }))
     try {
-      const { error } = await supabase.from("comentarios").insert({ solicitud_id: solicitudId, cliente_id: id, autor: "cliente", texto })
+      const { error } = await supabase.from("comentarios").insert({ proceso_id: procesoId, cliente_id: id, autor: "cliente", texto })
       if (error) throw error
-      await cargarComentariosSolicitud(solicitudId)
-      setNuevoComentarioSolicitud(prev => ({ ...prev, [solicitudId]: "" }))
+      await cargarComentarios(procesoId)
+      setNuevoComentario(prev => ({ ...prev, [procesoId]: "" }))
       mostrarToast("Comentario enviado", "ok")
     } catch (err: any) {
       mostrarToast("Error: " + (err.message || "No se pudo enviar"), "error")
-    } finally { setEnviandoComentarioSolicitud(prev => ({ ...prev, [solicitudId]: false })) }
+    } finally { setEnviandoComentario(prev => ({ ...prev, [procesoId]: false })) }
   }
 
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
   function limpiarFiltros() { setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("") }
 
-  // ========== DATOS PARA PESTAÑAS (usando `procesos`) ==========
-  const nuevos = procesos.filter(p => p.estado === "nuevo")
-  const interesados = procesos.filter(p => p.estado === "interesado")
+  // Filtrar procesos por pestaña
+  const nuevos = procesos.filter(p => p.estado === "nuevo" && !p.en_acompanamiento)
+  const interesados = procesos.filter(p => p.estado === "interesado" && !p.en_acompanamiento)
+  const acompanamiento = procesos.filter(p => p.en_acompanamiento === true)
 
-  // ========== DATOS PARA GRÁFICOS (usando `todosProcesos`) ==========
-  const solicitudesActivas = solicitudes.filter(s => s.estado === "pendiente" || s.estado === "en_proceso")
-  const idsEnAcompanamiento = solicitudesActivas.map(s => s.proceso_id).filter(Boolean)
-  const presAcompanamiento = todosProcesos.filter(p => idsEnAcompanamiento.includes(p.id)).reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
-  const presInteresados = todosProcesos.filter(p => p.estado === "interesado").reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
-  const presAnalisis = todosProcesos.filter(p => p.estado === "nuevo").reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
-  const presTotal = presAnalisis + presInteresados + presAcompanamiento
+  // Gráficos
+  const presNuevos = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
+  const presInteresados = interesados.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
+  const presAcompanamiento = acompanamiento.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
+  const presTotal = presNuevos + presInteresados + presAcompanamiento
 
-  // Tendencia (últimos 30 días)
+  // Tendencia
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
-  const procesosTendencia = todosProcesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
+  const procesosTendencia = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
   procesosTendencia.forEach(p => {
     const fechaKey = new Date(p.fecha_oferta!).toISOString().split('T')[0]
@@ -331,16 +278,17 @@ export default function PortalCliente() {
   }
 
   const deptoMap = new Map<string, number>()
-  todosProcesos.forEach(p => { if (p.departamento) deptoMap.set(p.departamento, (deptoMap.get(p.departamento) || 0) + 1) })
+  procesos.forEach(p => { if (p.departamento) deptoMap.set(p.departamento, (deptoMap.get(p.departamento) || 0) + 1) })
   const deptoData = Array.from(deptoMap.entries()).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0,5)
 
   const entidadMap = new Map<string, number>()
-  todosProcesos.forEach(p => { if (p.entidad) entidadMap.set(p.entidad, (entidadMap.get(p.entidad) || 0) + Number(p.presupuesto || 0)) })
+  procesos.forEach(p => { if (p.entidad) entidadMap.set(p.entidad, (entidadMap.get(p.entidad) || 0) + Number(p.presupuesto || 0)) })
   const topEntidades = Array.from(entidadMap.entries()).map(([name, total]) => ({ name, total })).sort((a,b) => b.total - a.total).slice(0,5)
 
   const deptos = [...new Set(procesos.map(p => p.departamento).filter(Boolean))].sort()
   const entidades = [...new Set(procesos.map(p => p.entidad).filter(Boolean))].sort()
   const modalidades = [...new Set(procesos.map(p => p.modalidad).filter(Boolean))].sort()
+
   const listaBase = tab === "nuevos" ? nuevos : tab === "interesado" ? interesados : []
   const listaActual = listaBase.filter(p => {
     if (fDepto && p.departamento !== fDepto) return false
@@ -379,8 +327,8 @@ export default function PortalCliente() {
             {[
               { id: "nuevos", label: "Nuevos", count: nuevos.length },
               { id: "interesado", label: "Mis Intereses", count: interesados.length },
-              { id: "descartados", label: "Descartados", count: descartados.length },
-              { id: "acompanamiento", label: "Acompañamiento", count: solicitudes.length }
+              { id: "acompanamiento", label: "Acompañamiento", count: acompanamiento.length },
+              { id: "descartados", label: "Descartados", count: descartados.length }
             ].map(tabItem => (
               <button key={tabItem.id} onClick={() => { setTab(tabItem.id); limpiarFiltros(); setFiltroPanel(false) }} className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-medium transition-all ${tab === tabItem.id ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm" : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"}`}>
                 {tabItem.label}{tabItem.count > 0 && <span className="text-[10px] font-mono bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded-full">{tabItem.count}</span>}
@@ -402,7 +350,7 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - GRÁFICOS (usando todosProcesos) */}
+          {/* COLUMNA IZQUIERDA - GRÁFICOS */}
           <div className="lg:col-span-3 space-y-5">
             {tendenciaData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
@@ -445,7 +393,7 @@ export default function PortalCliente() {
                   <PieChart>
                     <Pie data={[
                       { name: "Interesados", value: presInteresados, color: "#10b981" },
-                      { name: "En análisis", value: presAnalisis, color: "#f59e0b" },
+                      { name: "En análisis", value: presNuevos, color: "#f59e0b" },
                       { name: "Acompañamiento", value: presAcompanamiento, color: "#3b82f6" }
                     ]} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2} dataKey="value" stroke="none">
                       <Cell fill="#10b981" /><Cell fill="#f59e0b" /><Cell fill="#3b82f6" />
@@ -456,18 +404,18 @@ export default function PortalCliente() {
               </div>
               <div className="mt-3 space-y-1.5 text-[11px]">
                 <div className="flex justify-between"><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"/><span className="text-gray-600 dark:text-gray-400">Interesados</span></div><span className="text-gray-900 dark:text-white font-mono">{fmt(presInteresados)}</span></div>
-                <div className="flex justify-between"><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-amber-500"/><span className="text-gray-600 dark:text-gray-400">En análisis</span></div><span className="text-gray-900 dark:text-white font-mono">{fmt(presAnalisis)}</span></div>
+                <div className="flex justify-between"><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-amber-500"/><span className="text-gray-600 dark:text-gray-400">En análisis</span></div><span className="text-gray-900 dark:text-white font-mono">{fmt(presNuevos)}</span></div>
                 <div className="flex justify-between"><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"/><span className="text-gray-600 dark:text-gray-400">Acompañamiento</span></div><span className="text-gray-900 dark:text-white font-mono">{fmt(presAcompanamiento)}</span></div>
                 <div className="border-t border-gray-200 dark:border-gray-800 pt-2 mt-1"><div className="flex justify-between font-semibold"><span>Total potencial</span><span className="text-emerald-600 dark:text-emerald-400">{fmt(presTotal)}</span></div></div>
               </div>
             </div>
           </div>
 
-          {/* COLUMNA CENTRAL - PROCESOS */}
+          {/* COLUMNA CENTRAL */}
           <div className="lg:col-span-6 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-2"><h2 className="text-gray-900 dark:text-white font-bold text-lg flex items-center gap-2"><Zap size={16} className="text-emerald-600"/>{tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : tab === "acompanamiento" ? "Mis Solicitudes de Acompañamiento" : "Descartados"}</h2>{(tab === "nuevos" || tab === "interesado") && (<button onClick={() => setFiltroPanel(!filtroPanel)} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${filtrosActivos > 0 ? "bg-blue-600 text-white" : "bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}><Filter size={10}/> Filtrar {filtrosActivos > 0 && `(${filtrosActivos})`}</button>)}</div>
-              <div className="text-[10px] text-gray-500 font-mono">{tab === "acompanamiento" ? `${solicitudes.length} solicitud(es)` : `${listaActual.length} oportunidad(es) · ${fmt(listaActual.reduce((s,p)=>s+Number(p.presupuesto||0),0))}`}</div>
+              <div className="flex items-center gap-2"><h2 className="text-gray-900 dark:text-white font-bold text-lg flex items-center gap-2"><Zap size={16} className="text-emerald-600"/>{tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : tab === "acompanamiento" ? "Acompañamiento" : "Descartados"}</h2>{(tab === "nuevos" || tab === "interesado") && (<button onClick={() => setFiltroPanel(!filtroPanel)} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${filtrosActivos > 0 ? "bg-blue-600 text-white" : "bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}><Filter size={10}/> Filtrar {filtrosActivos > 0 && `(${filtrosActivos})`}</button>)}</div>
+              <div className="text-[10px] text-gray-500 font-mono">{tab === "acompanamiento" ? `${acompanamiento.length} solicitud(es)` : `${listaActual.length} oportunidad(es) · ${fmt(listaActual.reduce((s,p)=>s+Number(p.presupuesto||0),0))}`}</div>
             </div>
 
             {filtroPanel && (tab === "nuevos" || tab === "interesado") && (
@@ -483,32 +431,32 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* ACOMPAÑAMIENTO (con días restantes y fecha exacta) */}
+            {/* PESTAÑA ACOMPAÑAMIENTO */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
-                {solicitudes.length === 0 ? (
-                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-4xl mb-2">📋</div><div className="text-gray-900 dark:text-white font-medium">No tienes solicitudes de acompañamiento</div><div className="text-xs text-gray-500">Usa el botón "Enviar a SOFIA" en cualquier proceso.</div></div>
+                {acompanamiento.length === 0 ? (
+                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-4xl mb-2">📋</div><div className="text-gray-900 dark:text-white font-medium">No hay procesos en acompañamiento</div><div className="text-xs text-gray-500">Puedes enviar procesos desde "Mis Intereses" o "Nuevos".</div></div>
                 ) : (
-                  solicitudes.map(sol => {
-                    const proceso = todosProcesos.find(p => p.id === sol.proceso_id) || descartados.find(p => p.id === sol.proceso_id)
-                    if (!comentariosSolicitud[sol.id]) cargarComentariosSolicitud(sol.id)
-                    const etapaActual = sol.etapa_actual ?? 0
-                    const nombreEtapa = sol.etapa_nombre || ETAPAS[etapaActual]
-                    const isCollapsed = collapsedCards[sol.id] || false
-                    const isDetailsHidden = hideDetails[sol.id] || false
-                    const dias = diasRestantes(proceso?.fecha_oferta)
+                  acompanamiento.map(proceso => {
+                    if (!comentariosProceso[proceso.id]) cargarComentarios(proceso.id)
+                    const etapaActual = proceso.etapa_seguimiento ?? 0
+                    const nombreEtapa = ETAPAS[etapaActual]
+                    const isCollapsed = collapsedCards[proceso.id] || false
+                    const isDetailsHidden = hideDetails[proceso.id] || false
+                    const dias = diasRestantes(proceso.fecha_oferta)
                     const urgente = dias !== null && dias <= 3 && dias >= 0
                     return (
-                      <div key={sol.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
+                      <div key={proceso.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
                         <div className="flex justify-between items-start gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{proceso?.referencia || sol.numero_proceso}</span>
+                              <span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{proceso.referencia}</span>
+                              {urgente && <span className="text-[10px] font-mono text-amber-800 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full animate-pulse">⚡ Cierre urgente</span>}
                             </div>
-                            <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proceso?.entidad || "Proceso"}</h3>
+                            <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proceso.entidad || "Proceso"}</h3>
                           </div>
                           <div className="text-right flex-shrink-0">
-                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso?.presupuesto)}</div>
+                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso.presupuesto)}</div>
                             <div className="flex flex-col items-end">
                               <div className="flex items-center justify-end gap-1 mt-1">
                                 <Clock size={12} className="text-gray-500" />
@@ -516,15 +464,13 @@ export default function PortalCliente() {
                                   Cierra en {dias}d
                                 </span>
                               </div>
-                              <div className="text-[9px] text-gray-400 font-mono">
-                                {formatFechaCorta(proceso?.fecha_oferta)}
-                              </div>
+                              <div className="text-[9px] text-gray-400 font-mono">{formatFechaCorta(proceso.fecha_oferta)}</div>
                             </div>
                             <div className="flex items-center justify-end gap-2 mt-1">
-                              <div className={`text-[10px] px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
-                                {sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}
+                              <div className={`text-[10px] px-2 py-1 rounded-full ${(proceso.estado_acompanamiento || 'pendiente') === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : proceso.estado_acompanamiento === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
+                                {proceso.estado_acompanamiento === 'pendiente' ? 'Pendiente' : proceso.estado_acompanamiento === 'en_proceso' ? 'En proceso' : 'Atendida'}
                               </div>
-                              <button onClick={() => setCollapsedCards(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
+                              <button onClick={() => setCollapsedCards(prev => ({ ...prev, [proceso.id]: !prev[proceso.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
                                 {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
                               </button>
                             </div>
@@ -533,18 +479,18 @@ export default function PortalCliente() {
                         {!isCollapsed && (
                           <>
                             <div className="mt-3">
-                              <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">{proceso?.objeto || sol.observaciones}</p>
+                              <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">{proceso.objeto || "Sin descripción"}</p>
                               <div className="flex flex-wrap gap-2 mt-2">
-                                {proceso?.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {proceso.departamento}</span>}
-                                {proceso?.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {proceso.modalidad}</span>}
-                                {proceso?.resultado_ia && <span className="text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md">✓ IA</span>}
-                                {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}
+                                {proceso.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {proceso.departamento}</span>}
+                                {proceso.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {proceso.modalidad}</span>}
+                                {proceso.resultado_ia && <span className="text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md">✓ IA</span>}
+                                {proceso.url && <a href={proceso.url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}
                               </div>
                             </div>
                             <div className="border-t border-gray-200 dark:border-gray-800 mt-4 pt-3">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span>
-                                <button onClick={() => setHideDetails(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">
+                                <button onClick={() => setHideDetails(prev => ({ ...prev, [proceso.id]: !prev[proceso.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">
                                   {isDetailsHidden ? <Eye size={12} /> : <EyeOff size={12} />}
                                   {isDetailsHidden ? "Mostrar" : "Ocultar"}
                                 </button>
@@ -552,9 +498,9 @@ export default function PortalCliente() {
                               {!isDetailsHidden && (
                                 <>
                                   <Timeline etapa={etapaActual} />
-                                  {sol[`fecha_etapa_${etapaActual}`] && (
+                                  {proceso[`fecha_etapa_${etapaActual}`] && (
                                     <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500 flex items-center gap-2">
-                                      <Calendar size={12} /> Fecha registrada: {new Date(sol[`fecha_etapa_${etapaActual}`]).toLocaleString()}
+                                      <Calendar size={12} /> Fecha registrada: {new Date(proceso[`fecha_etapa_${etapaActual}`]).toLocaleString()}
                                     </div>
                                   )}
                                   <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500">
@@ -563,7 +509,7 @@ export default function PortalCliente() {
                                   <div className="mt-4">
                                     <span className="text-[11px] font-bold text-blue-600 flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
                                     <div className="space-y-2 max-h-32 overflow-y-auto mb-2">
-                                      {(comentariosSolicitud[sol.id] || []).map(c => (
+                                      {(comentariosProceso[proceso.id] || []).map(c => (
                                         <div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500' : 'bg-gray-100 dark:bg-gray-800'}`}>
                                           <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-500 mb-1">
                                             <span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Tú'}</span>
@@ -574,8 +520,8 @@ export default function PortalCliente() {
                                       ))}
                                     </div>
                                     <div className="flex gap-2">
-                                      <textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentarioSolicitud[sol.id] || ""} onChange={e => setNuevoComentarioSolicitud(prev => ({ ...prev, [sol.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentarioSolicitud(sol.id) } }} />
-                                      <button onClick={() => enviarComentarioSolicitud(sol.id)} disabled={enviandoComentarioSolicitud[sol.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button>
+                                      <textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentario[proceso.id] || ""} onChange={e => setNuevoComentario(prev => ({ ...prev, [proceso.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentario(proceso.id) } }} />
+                                      <button onClick={() => enviarComentario(proceso.id)} disabled={enviandoComentario[proceso.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button>
                                     </div>
                                   </div>
                                 </>
@@ -590,7 +536,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* NUEVOS / INTERESES (usando la lista `procesos` que ya excluye los enviados a acompañamiento) */}
+            {/* PESTAÑA NUEVOS / INTERESES */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
@@ -619,7 +565,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* DESCARTADOS (sin cambios) */}
+            {/* DESCARTADOS */}
             {tab === "descartados" && (
               <div className="space-y-3">
                 {descartados.length === 0 ? (<div className="text-center py-16 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-5xl mb-4">🗑</div><div className="text-[15px] font-semibold text-gray-900 dark:text-white mb-2">Sin procesos descartados</div><div className="text-[13px] text-gray-500">Se eliminan automáticamente después de 30 días.</div></div>) : (
@@ -629,16 +575,16 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA (sin cambios) */}
+          {/* COLUMNA DERECHA */}
           <div className="lg:col-span-3 space-y-5">
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
               <div className="space-y-2">
-                {[...todosProcesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}
+                {[...procesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}
               </div>
             </div>
             {topEntidades.length > 0 && (<div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-amber-500"/>Top entidades por presupuesto</h2><div className="space-y-2">{topEntidades.map((e, i) => (<div key={i} className="flex justify-between items-center text-xs"><span className="truncate w-32 text-gray-700 dark:text-gray-300">{e.name}</span><span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(e.total)}</span></div>))}</div></div>)}
-            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2><div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{todosProcesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div></div>
+            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2><div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{procesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div></div>
             {cliente?.drive_url && (<a href={cliente.drive_url} target="_blank" rel="noreferrer" className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-4 flex items-center gap-3 hover:shadow-sm transition-all"><FolderOpen size={18} className="text-blue-600" /><div><p className="text-[12px] font-medium text-gray-900 dark:text-white">Google Drive</p><p className="text-[10px] text-gray-500">Mis documentos</p></div></a>)}
           </div>
         </div>
