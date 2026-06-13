@@ -178,7 +178,7 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // ENVIAR A ACOMPAÑAMIENTO - NO elimina de todosProcesos, solo de procesos
+  // ======================= FUNCIÓN ENVIAR A ACOMPAÑAMIENTO (SIN RECARGA) =======================
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
     const proc = todosProcesos.find(x => x.id === procesoId)
@@ -189,6 +189,7 @@ export default function PortalCliente() {
     }
     setSaving(prev => ({ ...prev, [procesoId]: "acompanamiento" }))
 
+    // Insertar en BD
     const { data: newSolicitud, error } = await supabase
       .from("solicitudes_acompanamiento")
       .insert({
@@ -213,15 +214,23 @@ export default function PortalCliente() {
 
     console.log("Solicitud creada:", newSolicitud)
 
-    // Actualización local: solo eliminar de procesos (lista filtrada), no de todosProcesos
+    // ACTUALIZACIÓN LOCAL OPTIMISTA (sin esperar recarga)
+    // 1. Eliminar el proceso de las listas activas
     setProcesos(prev => prev.filter(p => p.id !== procesoId))
+    setTodosProcesos(prev => prev.filter(p => p.id !== procesoId))
+    // 2. Agregar la nueva solicitud al inicio de solicitudes
     setSolicitudes(prev => [newSolicitud, ...prev])
+    // 3. Cambiar a la pestaña de acompañamiento
     setTab("acompanamiento")
     mostrarToast("Solicitud enviada. El proceso ahora está en Acompañamiento.", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
-    // No llamar a cargar()
+
+    // IMPORTANTE: NO llamar a cargar() aquí, porque sobrescribiría los cambios locales.
+    // Si quieres sincronizar en segundo plano más tarde, hazlo con un setTimeout largo.
+    // setTimeout(() => cargar().catch(console.error), 2000);
   }
 
+  // ======================= FUNCIÓN DESCARTAR (SIN RECARGA) =======================
   async function descartar(procesoId: string) {
     setProcesoADescartar(null)
     const p = procesos.find(x => x.id === procesoId)
@@ -231,9 +240,11 @@ export default function PortalCliente() {
     }
     setSaliendo(prev => ({ ...prev, [procesoId]: true }))
 
+    // Actualizar BD
     await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
     await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
 
+    // Mover a descartados y eliminar de activas
     const procesoDescartado = { ...p, estado: "descartado" }
     setDescartados(prev => [procesoDescartado, ...prev])
     setProcesos(prev => prev.filter(x => x.id !== procesoId))
@@ -279,7 +290,7 @@ export default function PortalCliente() {
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
   function limpiarFiltros() { setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("") }
 
-  // Datos para gráficos (usando todosProcesos)
+  // Datos para gráficos
   const nuevos = todosProcesos.filter(p => p.estado === "nuevo")
   const interesados = todosProcesos.filter(p => p.estado === "interesado")
   const solicitudesActivas = solicitudes.filter(s => s.estado === "pendiente" || s.estado === "en_proceso")
