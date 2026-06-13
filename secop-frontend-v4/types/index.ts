@@ -40,18 +40,28 @@ export interface Proceso {
   etapa_seguimiento: number
   drive_proceso_url: string | null
   es_manual: boolean
+
+  // Fechas de etapas de seguimiento (timeline)
   fecha_etapa_0?: string | null
   fecha_etapa_1?: string | null
   fecha_etapa_2?: string | null
   fecha_etapa_3?: string | null
   fecha_etapa_4?: string | null
   fecha_informe_evaluacion?: string | null
+
+  // NUEVAS FECHAS CLAVE PARA ADMIN (informes)
+  fecha_informe_preliminar?: string | null
+  fecha_traslado_subsanacion?: string | null
+  fecha_informe_definitivo?: string | null
+
   resultado_final?: 'ganado' | 'perdido' | 'desierto' | null
   nota_resultado?: string | null
-  // NUEVAS PROPIEDADES PARA ACOMPAÑAMIENTO UNIFICADO
+
+  // Propiedades para acompañamiento unificado
   en_acompanamiento?: boolean
   estado_acompanamiento?: 'pendiente' | 'en_proceso' | 'atendida' | null
   acompanamiento_creado_en?: string | null
+
   created_at: string
   updated_at: string
 }
@@ -86,7 +96,7 @@ export interface Metrics {
   duracion_ultima_ejecucion: number | null
 }
 
-// Opcional: si aún usas SolicitudAcompanamiento en admin, mantenla
+// Mantenido por compatibilidad (si aún usas solicitudes de acompañamiento en algún lado)
 export interface SolicitudAcompanamiento {
   id: string
   cliente_id: string
