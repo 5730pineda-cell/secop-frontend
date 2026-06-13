@@ -16,7 +16,7 @@ import {
 
 // ---------- HELPERS ----------
 function fmt(n: number | null | undefined): string {
-  if (!n) return "—"
+  if (!n) return "$0"
   const v = Number(n)
   if (v >= 1e9) return "$" + (v / 1e9).toFixed(1).replace(".", ",") + " mil M"
   if (v >= 1e6) return "$" + Math.round(v / 1e6).toLocaleString("es-CO") + "M"
@@ -36,7 +36,7 @@ function diasRestantes(f: string | null): number | null {
 
 const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 
-// ---------- TIMELINE (con check en última etapa) ----------
+// ---------- TIMELINE CORREGIDA ----------
 function Timeline({ etapa }: { etapa: number }) {
   const idx = Math.min(Math.max(0, etapa), 4)
   return (
@@ -247,7 +247,7 @@ export default function PortalCliente() {
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
-  // Tendencia últimos 30 días con línea de tendencia
+  // Tendencia
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
@@ -256,8 +256,7 @@ export default function PortalCliente() {
     tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1)
   })
   let tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
-  
-  // Línea de tendencia (regresión lineal)
+  // Línea de tendencia
   let trendData: { fecha: string; trend: number | null }[] = []
   if (tendenciaData.length >= 2) {
     const n = tendenciaData.length
@@ -274,12 +273,10 @@ export default function PortalCliente() {
     }))
   }
 
-  // Procesos por departamento
   const deptoMap = new Map<string, number>()
   procesos.forEach(p => { if (p.departamento) deptoMap.set(p.departamento, (deptoMap.get(p.departamento) || 0) + 1) })
   const deptoData = Array.from(deptoMap.entries()).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0,5)
 
-  // Top entidades por presupuesto
   const entidadMap = new Map<string, number>()
   procesos.forEach(p => { if (p.entidad) entidadMap.set(p.entidad, (entidadMap.get(p.entidad) || 0) + Number(p.presupuesto || 0)) })
   const topEntidades = Array.from(entidadMap.entries()).map(([name, total]) => ({ name, total })).sort((a,b) => b.total - a.total).slice(0,5)
@@ -348,37 +345,27 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - gráficos (sin cambios) */}
+          {/* COLUMNA IZQUIERDA - GRÁFICOS */}
           <div className="lg:col-span-3 space-y-5">
-            {/* Tendencia con área y línea de tendencia */}
             {tendenciaData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
                 <div className="flex items-center gap-2 mb-4"><TrendingUp size={14} className="text-blue-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tendencia de procesos</h2></div>
                 <div className="h-[200px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={tendenciaData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-                      <defs>
-                        <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
+                      <defs><linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/><stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/></linearGradient></defs>
                       <XAxis dataKey="fecha" tick={{ fontSize: 9, fill: '#6b7280' }} interval="preserveStartEnd" tickFormatter={(v) => v.slice(5)} />
                       <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} allowDecimals={false} domain={[0, 'dataMax + 1']} />
                       <Tooltip contentStyle={tooltipStyle} labelFormatter={(l) => `Fecha: ${l}`} />
                       <Area type="monotone" dataKey="count" stroke="none" fill="url(#colorCount)" />
                       <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} />
-                      {trendData.length > 0 && (
-                        <Line type="linear" dataKey="trend" data={trendData} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="3 3" dot={false} />
-                      )}
+                      {trendData.length > 0 && <Line type="linear" dataKey="trend" data={trendData} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="3 3" dot={false} />}
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="text-center text-[9px] text-gray-500 mt-2">Últimos 30 días (línea punteada: tendencia)</div>
               </div>
             )}
-
-            {/* Procesos por departamento */}
             {deptoData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
                 <div className="flex items-center gap-2 mb-4"><MapPin size={14} className="text-emerald-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Procesos por departamento</h2></div>
@@ -394,8 +381,6 @@ export default function PortalCliente() {
                 </div>
               </div>
             )}
-
-            {/* Distribución presupuestaria */}
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-4"><PieChartIcon size={14} className="text-emerald-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Distribución presupuestaria</h2></div>
               <div className="h-[200px] w-full">
@@ -441,11 +426,15 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO - CORREGIDA: presupuesto destacado a la derecha */}
+            {/* ========== PESTAÑA ACOMPAÑAMIENTO CON DISEÑO UNIFICADO ========== */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
-                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-4xl mb-2">📋</div><div className="text-gray-900 dark:text-white font-medium">No tienes solicitudes de acompañamiento</div><div className="text-xs text-gray-500">Usa el botón "Enviar a SOFIA" en cualquier proceso.</div></div>
+                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800">
+                    <div className="text-4xl mb-2">📋</div>
+                    <div className="text-gray-900 dark:text-white font-medium">No tienes solicitudes de acompañamiento</div>
+                    <div className="text-xs text-gray-500">Usa el botón "Enviar a SOFIA" en cualquier proceso.</div>
+                  </div>
                 ) : (
                   solicitudes.map(sol => {
                     const proceso = procesos.find(p => p.id === sol.proceso_id) || descartados.find(p => p.id === sol.proceso_id)
@@ -455,18 +444,22 @@ export default function PortalCliente() {
                     const isCollapsed = collapsedCards[sol.id] || false
                     const isDetailsHidden = hideDetails[sol.id] || false
                     return (
-                      <div key={sol.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 transition-all shadow-sm">
-                        {/* Cabecera con dos columnas: izquierda (entidad+referencia) y derecha (presupuesto + estado + colapso) */}
+                      <div key={sol.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
+                        {/* Cabecera: igual que en Nuevos/Intereses */}
                         <div className="flex justify-between items-start gap-4">
                           <div className="flex-1 min-w-0">
-                            <div className="font-bold text-gray-900 dark:text-white text-lg">{proceso?.entidad || "Proceso"}</div>
-                            <div className="text-xs text-blue-600 font-mono">{proceso?.referencia || sol.numero_proceso}</div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{proceso?.referencia || sol.numero_proceso}</span>
+                            </div>
+                            <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proceso?.entidad || "Proceso"}</h3>
                           </div>
                           <div className="text-right flex-shrink-0">
-                            {/* Presupuesto grande a la derecha, como en Nuevos */}
-                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso?.presupuesto)}</div>
+                            {/* Presupuesto grande */}
+                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
+                              {fmt(proceso?.presupuesto)}
+                            </div>
                             <div className="flex items-center justify-end gap-2 mt-1">
-                              <div className={`text-xs px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
+                              <div className={`text-[10px] px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
                                 {sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}
                               </div>
                               <button onClick={() => setCollapsedCards(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
@@ -476,20 +469,21 @@ export default function PortalCliente() {
                           </div>
                         </div>
 
+                        {/* Contenido colapsable (detalles, timeline, comentarios) */}
                         {!isCollapsed && (
                           <>
-                            {/* Detalles del proceso */}
-                            <div className="bg-gray-100 dark:bg-gray-800/50 rounded-lg p-3 my-4">
-                              <p className="text-sm text-gray-700 dark:text-gray-300">{proceso?.objeto || sol.observaciones}</p>
-                              <div className="flex gap-3 mt-2 text-xs">
-                                {proceso?.departamento && <span><MapPin size={12} className="inline mr-1" />{proceso.departamento}</span>}
-                                {proceso?.modalidad && <span><Briefcase size={12} className="inline mr-1" />{proceso.modalidad}</span>}
+                            {/* Descripción y metadatos */}
+                            <div className="mt-3">
+                              <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">{proceso?.objeto || sol.observaciones}</p>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {proceso?.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {proceso.departamento}</span>}
+                                {proceso?.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {proceso.modalidad}</span>}
+                                {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}
                               </div>
-                              {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 block mt-2">Ver SECOP ↗</a>}
                             </div>
 
-                            {/* Gestión y comentarios (ocultable) */}
-                            <div className="border-t border-gray-200 dark:border-gray-800 pt-3">
+                            {/* Gestión y comentarios (ocultable con el ojo) */}
+                            <div className="border-t border-gray-200 dark:border-gray-800 mt-4 pt-3">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span>
                                 <button onClick={() => setHideDetails(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">
@@ -535,11 +529,15 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PROCESOS NUEVOS O INTERESADOS - sin cambios */}
+            {/* PESTAÑA NUEVOS / INTERESES (sin cambios, ya funciona bien) */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
-                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-4xl mb-2">{tab === "interesado" ? "⭐" : "📋"}</div><div className="text-gray-900 dark:text-white font-medium">No hay procesos para mostrar</div><div className="text-xs text-gray-500">Los procesos enviados a acompañamiento están en su propia pestaña.</div></div>
+                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800">
+                    <div className="text-4xl mb-2">{tab === "interesado" ? "⭐" : "📋"}</div>
+                    <div className="text-gray-900 dark:text-white font-medium">No hay procesos para mostrar</div>
+                    <div className="text-xs text-gray-500">Los procesos enviados a acompañamiento están en su propia pestaña.</div>
+                  </div>
                 ) : (
                   listaActual.map(p => {
                     const dias = diasRestantes(p.fecha_oferta)
@@ -550,8 +548,20 @@ export default function PortalCliente() {
                     return (
                       <div key={p.id} className={`bg-white dark:bg-gray-900/60 rounded-xl border transition-all duration-300 ${isSaliendo ? "opacity-0 scale-95 transition-all" : ""} ${isInt ? "border-blue-300 dark:border-blue-800" : urgente ? "border-amber-300 dark:border-amber-800" : "border-gray-200 dark:border-gray-800"} p-5 shadow-sm hover:shadow-md`}>
                         <div className="flex justify-between items-start gap-4">
-                          <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{p.referencia}</span>{urgente && <span className="text-[10px] font-mono text-amber-800 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full animate-pulse">⚡ Cierre urgente</span>}</div><h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-2 tracking-tight">{p.entidad || "—"}</h3></div>
-                          <div className="text-right flex-shrink-0"><div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(p.presupuesto)}</div><div className="flex flex-col items-end"><div className="flex items-center justify-end gap-1 mt-1"><Clock size={12} className="text-gray-500" /><span className={`text-[11px] font-mono ${urgente ? "text-amber-600 dark:text-amber-400" : "text-gray-500"}`}>Cierra en {dias}d</span></div><div className="text-[9px] text-gray-400 font-mono">{formatFechaCorta(p.fecha_oferta)}</div></div></div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{p.referencia}</span>
+                              {urgente && <span className="text-[10px] font-mono text-amber-800 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full animate-pulse">⚡ Cierre urgente</span>}
+                            </div>
+                            <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-2 tracking-tight">{p.entidad || "—"}</h3>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(p.presupuesto)}</div>
+                            <div className="flex flex-col items-end">
+                              <div className="flex items-center justify-end gap-1 mt-1"><Clock size={12} className="text-gray-500" /><span className={`text-[11px] font-mono ${urgente ? "text-amber-600 dark:text-amber-400" : "text-gray-500"}`}>Cierra en {dias}d</span></div>
+                              <div className="text-[9px] text-gray-400 font-mono">{formatFechaCorta(p.fecha_oferta)}</div>
+                            </div>
+                          </div>
                         </div>
                         <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed mt-3 line-clamp-2">{p.objeto || "Sin descripción"}</p>
                         <div className="flex flex-wrap gap-2 mt-3">
@@ -573,7 +583,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* DESCARTADOS - sin cambios */}
+            {/* DESCARTADOS (sin cambios) */}
             {tab === "descartados" && (
               <div className="space-y-3">
                 {descartados.length === 0 ? (<div className="text-center py-16 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-5xl mb-4">🗑</div><div className="text-[15px] font-semibold text-gray-900 dark:text-white mb-2">Sin procesos descartados</div><div className="text-[13px] text-gray-500">Se eliminan automáticamente después de 30 días.</div></div>) : (
@@ -583,7 +593,7 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA - sin cambios */}
+          {/* COLUMNA DERECHA - MÉTRICAS */}
           <div className="lg:col-span-3 space-y-5">
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
@@ -591,14 +601,12 @@ export default function PortalCliente() {
                 {[...procesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}
               </div>
             </div>
-
             {topEntidades.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
                 <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-amber-500"/>Top entidades por presupuesto</h2>
                 <div className="space-y-2">{topEntidades.map((e, i) => (<div key={i} className="flex justify-between items-center text-xs"><span className="truncate w-32 text-gray-700 dark:text-gray-300">{e.name}</span><span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(e.total)}</span></div>))}</div>
               </div>
             )}
-
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2>
               <div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{procesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div>
