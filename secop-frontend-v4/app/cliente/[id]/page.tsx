@@ -178,15 +178,10 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // ENVIAR A ACOMPAÑAMIENTO - NO elimina de todosProcesos, solo de procesos
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
     const proc = todosProcesos.find(x => x.id === procesoId)
-    if (!proc) {
-      console.error("No se encontró el proceso en todosProcesos", procesoId)
-      mostrarToast("Error: proceso no encontrado", "error")
-      return
-    }
+    if (!proc) return
     setSaving(prev => ({ ...prev, [procesoId]: "acompanamiento" }))
 
     const { data: newSolicitud, error } = await supabase
@@ -205,30 +200,24 @@ export default function PortalCliente() {
       .single()
 
     if (error) {
-      console.error("Error insertando solicitud:", error)
       mostrarToast("Error: " + error.message, "error")
       setSaving(prev => ({ ...prev, [procesoId]: false }))
       return
     }
 
-    console.log("Solicitud creada:", newSolicitud)
-
-    // Actualización local: solo eliminar de procesos (lista filtrada), no de todosProcesos
+    // Actualización local optimista
     setProcesos(prev => prev.filter(p => p.id !== procesoId))
+    setTodosProcesos(prev => prev.filter(p => p.id !== procesoId))
     setSolicitudes(prev => [newSolicitud, ...prev])
     setTab("acompanamiento")
     mostrarToast("Solicitud enviada. El proceso ahora está en Acompañamiento.", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
-    // No llamar a cargar()
   }
 
   async function descartar(procesoId: string) {
     setProcesoADescartar(null)
     const p = procesos.find(x => x.id === procesoId)
-    if (!p) {
-      console.warn("No se encontró el proceso en procesos para descartar", procesoId)
-      return
-    }
+    if (!p) return
     setSaliendo(prev => ({ ...prev, [procesoId]: true }))
 
     await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
@@ -279,7 +268,7 @@ export default function PortalCliente() {
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
   function limpiarFiltros() { setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("") }
 
-  // Datos para gráficos (usando todosProcesos)
+  // Datos para gráficos
   const nuevos = todosProcesos.filter(p => p.estado === "nuevo")
   const interesados = todosProcesos.filter(p => p.estado === "interesado")
   const solicitudesActivas = solicitudes.filter(s => s.estado === "pendiente" || s.estado === "en_proceso")
@@ -459,7 +448,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* ACOMPAÑAMIENTO */}
+            {/* ========== PESTAÑA ACOMPAÑAMIENTO CON DISEÑO UNIFICADO ========== */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
@@ -467,30 +456,88 @@ export default function PortalCliente() {
                 ) : (
                   solicitudes.map(sol => {
                     const proceso = todosProcesos.find(p => p.id === sol.proceso_id) || descartados.find(p => p.id === sol.proceso_id)
+                    if (!proceso) return null // Si no hay proceso asociado, no mostrar (esto no debería pasar)
                     if (!comentariosSolicitud[sol.id]) cargarComentariosSolicitud(sol.id)
                     const etapaActual = sol.etapa_actual ?? 0
                     const nombreEtapa = sol.etapa_nombre || ETAPAS[etapaActual]
                     const isCollapsed = collapsedCards[sol.id] || false
                     const isDetailsHidden = hideDetails[sol.id] || false
+                    const dias = diasRestantes(proceso.fecha_oferta)
+                    const urgente = dias !== null && dias <= 3 && dias >= 0
                     return (
                       <div key={sol.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
+                        {/* Cabecera IDÉNTICA a Nuevos/Intereses */}
                         <div className="flex justify-between items-start gap-4">
-                          <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{proceso?.referencia || sol.numero_proceso}</span></div><h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proceso?.entidad || "Proceso"}</h3></div>
-                          <div className="text-right flex-shrink-0"><div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso?.presupuesto)}</div><div className="flex items-center justify-end gap-2 mt-1"><div className={`text-[10px] px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>{sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}</div><button onClick={() => setCollapsedCards(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">{isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</button></div></div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{proceso.referencia}</span>
+                              {urgente && <span className="text-[10px] font-mono text-amber-800 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full animate-pulse">⚡ Cierre urgente</span>}
+                            </div>
+                            <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-2 tracking-tight">{proceso.entidad || "—"}</h3>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso.presupuesto)}</div>
+                            <div className="flex flex-col items-end">
+                              <div className="flex items-center justify-end gap-1 mt-1"><Clock size={12} className="text-gray-500" /><span className={`text-[11px] font-mono ${urgente ? "text-amber-600 dark:text-amber-400" : "text-gray-500"}`}>Cierra en {dias}d</span></div>
+                              <div className="text-[9px] text-gray-400 font-mono">{formatFechaCorta(proceso.fecha_oferta)}</div>
+                            </div>
+                            <div className="flex items-center justify-end gap-2 mt-2">
+                              <div className={`text-[10px] px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
+                                {sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}
+                              </div>
+                              <button onClick={() => setCollapsedCards(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
+                                {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                              </button>
+                            </div>
+                          </div>
                         </div>
+
+                        {/* Contenido colapsable */}
                         {!isCollapsed && (
                           <>
-                            <div className="mt-3"><p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">{proceso?.objeto || sol.observaciones}</p><div className="flex flex-wrap gap-2 mt-2">{proceso?.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {proceso.departamento}</span>}{proceso?.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {proceso.modalidad}</span>}{sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}</div></div>
+                            {/* Objeto y metadatos */}
+                            <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed mt-3 line-clamp-2">{proceso.objeto || "Sin descripción"}</p>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {proceso.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {proceso.departamento}</span>}
+                              {proceso.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {proceso.modalidad}</span>}
+                              {proceso.resultado_ia && <span className="text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md">✓ IA</span>}
+                              {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}
+                            </div>
+
+                            {/* Gestión y comentarios (ocultable con ojo) */}
                             <div className="border-t border-gray-200 dark:border-gray-800 mt-4 pt-3">
-                              <div className="flex justify-between items-center mb-2"><span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span><button onClick={() => setHideDetails(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">{isDetailsHidden ? <Eye size={12} /> : <EyeOff size={12} />}{isDetailsHidden ? "Mostrar" : "Ocultar"}</button></div>
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span>
+                                <button onClick={() => setHideDetails(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">
+                                  {isDetailsHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+                                  {isDetailsHidden ? "Mostrar" : "Ocultar"}
+                                </button>
+                              </div>
                               {!isDetailsHidden && (
                                 <>
                                   <Timeline etapa={etapaActual} />
-                                  {sol[`fecha_etapa_${etapaActual}`] && (<div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500 flex items-center gap-2"><Calendar size={12} /> Fecha registrada: {new Date(sol[`fecha_etapa_${etapaActual}`]).toLocaleString()}</div>)}
-                                  <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500">{etapaActual === 0 ? "El equipo OC iniciará el análisis pronto." : `Estamos en la etapa ${nombreEtapa}.`}</div>
-                                  <div className="mt-4"><span className="text-[11px] font-bold text-blue-600 flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
-                                    <div className="space-y-2 max-h-32 overflow-y-auto mb-2">{(comentariosSolicitud[sol.id] || []).map(c => (<div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500' : 'bg-gray-100 dark:bg-gray-800'}`}><div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-500 mb-1"><span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Tú'}</span><span>{new Date(c.created_at).toLocaleString()}</span></div><p className="text-gray-800 dark:text-gray-200">{c.texto}</p></div>))}</div>
-                                    <div className="flex gap-2"><textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentarioSolicitud[sol.id] || ""} onChange={e => setNuevoComentarioSolicitud(prev => ({ ...prev, [sol.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentarioSolicitud(sol.id) } }} /><button onClick={() => enviarComentarioSolicitud(sol.id)} disabled={enviandoComentarioSolicitud[sol.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button></div>
+                                  {sol[`fecha_etapa_${etapaActual}`] && (
+                                    <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500 flex items-center gap-2">
+                                      <Calendar size={12} /> Fecha registrada: {new Date(sol[`fecha_etapa_${etapaActual}`]).toLocaleString()}
+                                    </div>
+                                  )}
+                                  <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500">
+                                    {etapaActual === 0 ? "El equipo OC iniciará el análisis pronto." : `Estamos en la etapa ${nombreEtapa}.`}
+                                  </div>
+                                  <div className="mt-4">
+                                    <span className="text-[11px] font-bold text-blue-600 flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
+                                    <div className="space-y-2 max-h-32 overflow-y-auto mb-2">
+                                      {(comentariosSolicitud[sol.id] || []).map(c => (
+                                        <div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                                          <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-500 mb-1"><span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Tú'}</span><span>{new Date(c.created_at).toLocaleString()}</span></div>
+                                          <p className="text-gray-800 dark:text-gray-200">{c.texto}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentarioSolicitud[sol.id] || ""} onChange={e => setNuevoComentarioSolicitud(prev => ({ ...prev, [sol.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentarioSolicitud(sol.id) } }} />
+                                      <button onClick={() => enviarComentarioSolicitud(sol.id)} disabled={enviandoComentarioSolicitud[sol.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button>
+                                    </div>
                                   </div>
                                 </>
                               )}
@@ -504,7 +551,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* NUEVOS / INTERESES */}
+            {/* NUEVOS / INTERESES (sin cambios) */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
