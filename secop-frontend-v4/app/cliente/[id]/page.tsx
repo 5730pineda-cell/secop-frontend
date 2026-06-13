@@ -87,7 +87,7 @@ export default function PortalCliente() {
   const id = params.id as string
 
   const [cliente, setCliente] = useState<Cliente | null>(null)
-  const [procesos, setProcesos] = useState<Proceso[]>([])
+  const [procesos, setProcesos] = useState<Proceso[]>([])        // todos los procesos activos (incluye acompañamiento)
   const [descartados, setDescartados] = useState<Proceso[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -141,14 +141,16 @@ export default function PortalCliente() {
     const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
-    // Cargar todos los procesos (incluidos los de acompañamiento)
-    const { data: procesosData } = await supabase
+    // Cargar todos los procesos activos (no descartados)
+    const hoy = new Date().toISOString()
+    const { data: allProcesos } = await supabase
       .from("procesos")
       .select("*")
       .eq("cliente_id", id)
       .neq("estado", "descartado")
+      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
       .order("fecha_oferta", { ascending: true })
-    setProcesos(procesosData || [])
+    setProcesos(allProcesos || [])
 
     const { data: desc } = await supabase
       .from("procesos")
@@ -167,6 +169,7 @@ export default function PortalCliente() {
     }
   }
 
+  // Marcar interés (si no está en acompañamiento)
   async function marcarInteres(procesoId: string) {
     if (saving[procesoId]) return
     setSaving(prev => ({ ...prev, [procesoId]: true }))
@@ -177,9 +180,13 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
+  // Enviar a acompañamiento (ahora solo actualiza el proceso)
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
+    const proc = procesos.find(x => x.id === procesoId)
+    if (!proc) return
     setSaving(prev => ({ ...prev, [procesoId]: "acompanamiento" }))
+
     const { error } = await supabase
       .from("procesos")
       .update({
@@ -189,10 +196,17 @@ export default function PortalCliente() {
         etapa_seguimiento: 0
       })
       .eq("id", procesoId)
+
     if (error) {
       mostrarToast("Error: " + error.message, "error")
     } else {
-      setProcesos(prev => prev.map(p => p.id === procesoId ? { ...p, en_acompanamiento: true, estado_acompanamiento: 'pendiente', acompanamiento_creado_en: new Date().toISOString(), etapa_seguimiento: 0 } : p))
+      // Actualización local
+      setProcesos(prev => prev.map(p => p.id === procesoId ? {
+        ...p,
+        en_acompanamiento: true,
+        estado_acompanamiento: 'pendiente',
+        acompanamiento_creado_en: new Date().toISOString()
+      } : p))
       mostrarToast("Proceso enviado a acompañamiento", "ok")
       setTab("acompanamiento")
     }
@@ -204,11 +218,14 @@ export default function PortalCliente() {
     const p = procesos.find(x => x.id === procesoId)
     if (!p) return
     setSaliendo(prev => ({ ...prev, [procesoId]: true }))
+
     await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
     await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
+
     const procesoDescartado = { ...p, estado: "descartado" }
     setDescartados(prev => [procesoDescartado, ...prev])
     setProcesos(prev => prev.filter(x => x.id !== procesoId))
+
     setTimeout(() => setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n }), 320)
     mostrarToast("Proceso descartado", "info")
   }
@@ -217,7 +234,7 @@ export default function PortalCliente() {
     await supabase.from("procesos").update({ estado: "nuevo", updated_at: new Date().toISOString() }).eq("id", procesoId)
     const p = descartados.find(x => x.id === procesoId)
     if (p) {
-      const restaurado = { ...p, estado: "nuevo" }
+      const restaurado = { ...p, estado: "nuevo", en_acompanamiento: false }
       setProcesos(prev => [restaurado, ...prev])
     }
     setDescartados(prev => prev.filter(x => x.id !== procesoId))
@@ -248,18 +265,18 @@ export default function PortalCliente() {
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
   function limpiarFiltros() { setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("") }
 
-  // Filtrar procesos por pestaña
+  // Filtrar por pestañas
   const nuevos = procesos.filter(p => p.estado === "nuevo" && !p.en_acompanamiento)
   const interesados = procesos.filter(p => p.estado === "interesado" && !p.en_acompanamiento)
   const acompanamiento = procesos.filter(p => p.en_acompanamiento === true)
 
-  // Gráficos
-  const presNuevos = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
-  const presInteresados = interesados.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
-  const presAcompanamiento = acompanamiento.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
+  // Datos para gráficos (usando procesos completos)
+  const presNuevos = nuevos.reduce((sum, p) => sum + (p.presupuesto || 0), 0)
+  const presInteresados = interesados.reduce((sum, p) => sum + (p.presupuesto || 0), 0)
+  const presAcompanamiento = acompanamiento.reduce((sum, p) => sum + (p.presupuesto || 0), 0)
   const presTotal = presNuevos + presInteresados + presAcompanamiento
 
-  // Tendencia
+  // Tendencia (últimos 30 días)
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
@@ -282,20 +299,19 @@ export default function PortalCliente() {
   const deptoData = Array.from(deptoMap.entries()).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0,5)
 
   const entidadMap = new Map<string, number>()
-  procesos.forEach(p => { if (p.entidad) entidadMap.set(p.entidad, (entidadMap.get(p.entidad) || 0) + Number(p.presupuesto || 0)) })
+  procesos.forEach(p => { if (p.entidad) entidadMap.set(p.entidad, (entidadMap.get(p.entidad) || 0) + (p.presupuesto || 0)) })
   const topEntidades = Array.from(entidadMap.entries()).map(([name, total]) => ({ name, total })).sort((a,b) => b.total - a.total).slice(0,5)
 
   const deptos = [...new Set(procesos.map(p => p.departamento).filter(Boolean))].sort()
   const entidades = [...new Set(procesos.map(p => p.entidad).filter(Boolean))].sort()
   const modalidades = [...new Set(procesos.map(p => p.modalidad).filter(Boolean))].sort()
-
   const listaBase = tab === "nuevos" ? nuevos : tab === "interesado" ? interesados : []
   const listaActual = listaBase.filter(p => {
     if (fDepto && p.departamento !== fDepto) return false
     if (fEntidad && p.entidad !== fEntidad) return false
     if (fModalidad && p.modalidad !== fModalidad) return false
-    if (fPresMin && Number(p.presupuesto) < Number(fPresMin) * 1e6) return false
-    if (fPresMax && Number(p.presupuesto) > Number(fPresMax) * 1e6) return false
+    if (fPresMin && (p.presupuesto || 0) < Number(fPresMin) * 1e6) return false
+    if (fPresMax && (p.presupuesto || 0) > Number(fPresMax) * 1e6) return false
     if (fTexto && !p.objeto?.toLowerCase().includes(fTexto.toLowerCase()) && !p.referencia?.toLowerCase().includes(fTexto.toLowerCase()) && !p.entidad?.toLowerCase().includes(fTexto.toLowerCase())) return false
     if (searchTerm && !p.entidad?.toLowerCase().includes(searchTerm.toLowerCase()) && !p.referencia?.toLowerCase().includes(searchTerm.toLowerCase())) return false
     return true
@@ -327,8 +343,8 @@ export default function PortalCliente() {
             {[
               { id: "nuevos", label: "Nuevos", count: nuevos.length },
               { id: "interesado", label: "Mis Intereses", count: interesados.length },
-              { id: "acompanamiento", label: "Acompañamiento", count: acompanamiento.length },
-              { id: "descartados", label: "Descartados", count: descartados.length }
+              { id: "descartados", label: "Descartados", count: descartados.length },
+              { id: "acompanamiento", label: "Acompañamiento", count: acompanamiento.length }
             ].map(tabItem => (
               <button key={tabItem.id} onClick={() => { setTab(tabItem.id); limpiarFiltros(); setFiltroPanel(false) }} className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-medium transition-all ${tab === tabItem.id ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm" : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"}`}>
                 {tabItem.label}{tabItem.count > 0 && <span className="text-[10px] font-mono bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded-full">{tabItem.count}</span>}
@@ -415,7 +431,7 @@ export default function PortalCliente() {
           <div className="lg:col-span-6 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2"><h2 className="text-gray-900 dark:text-white font-bold text-lg flex items-center gap-2"><Zap size={16} className="text-emerald-600"/>{tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : tab === "acompanamiento" ? "Acompañamiento" : "Descartados"}</h2>{(tab === "nuevos" || tab === "interesado") && (<button onClick={() => setFiltroPanel(!filtroPanel)} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${filtrosActivos > 0 ? "bg-blue-600 text-white" : "bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}><Filter size={10}/> Filtrar {filtrosActivos > 0 && `(${filtrosActivos})`}</button>)}</div>
-              <div className="text-[10px] text-gray-500 font-mono">{tab === "acompanamiento" ? `${acompanamiento.length} solicitud(es)` : `${listaActual.length} oportunidad(es) · ${fmt(listaActual.reduce((s,p)=>s+Number(p.presupuesto||0),0))}`}</div>
+              <div className="text-[10px] text-gray-500 font-mono">{tab === "acompanamiento" ? `${acompanamiento.length} solicitud(es)` : `${listaActual.length} oportunidad(es) · ${fmt(listaActual.reduce((s,p)=>s+(p.presupuesto||0),0))}`}</div>
             </div>
 
             {filtroPanel && (tab === "nuevos" || tab === "interesado") && (
@@ -431,46 +447,47 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO */}
+            {/* PESTAÑA ACOMPAÑAMIENTO (PROCESOS CON en_acompanamiento = true) */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {acompanamiento.length === 0 ? (
-                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-4xl mb-2">📋</div><div className="text-gray-900 dark:text-white font-medium">No hay procesos en acompañamiento</div><div className="text-xs text-gray-500">Puedes enviar procesos desde "Mis Intereses" o "Nuevos".</div></div>
+                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800">
+                    <div className="text-4xl mb-2">📋</div>
+                    <div className="text-gray-900 dark:text-white font-medium">No hay procesos en acompañamiento</div>
+                    <div className="text-xs text-gray-500">Usa el botón "Enviar a SOFIA" en cualquier proceso.</div>
+                  </div>
                 ) : (
-                  acompanamiento.map(proceso => {
-                    if (!comentariosProceso[proceso.id]) cargarComentarios(proceso.id)
-                    const etapaActual = proceso.etapa_seguimiento ?? 0
+                  acompanamiento.map(proc => {
+                    if (!comentariosProceso[proc.id]) cargarComentarios(proc.id)
+                    const etapaActual = proc.etapa_seguimiento ?? 0
                     const nombreEtapa = ETAPAS[etapaActual]
-                    const isCollapsed = collapsedCards[proceso.id] || false
-                    const isDetailsHidden = hideDetails[proceso.id] || false
-                    const dias = diasRestantes(proceso.fecha_oferta)
+                    const isCollapsed = collapsedCards[proc.id] || false
+                    const isDetailsHidden = hideDetails[proc.id] || false
+                    const dias = diasRestantes(proc.fecha_oferta)
                     const urgente = dias !== null && dias <= 3 && dias >= 0
                     return (
-                      <div key={proceso.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
+                      <div key={proc.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
                         <div className="flex justify-between items-start gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{proceso.referencia}</span>
-                              {urgente && <span className="text-[10px] font-mono text-amber-800 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full animate-pulse">⚡ Cierre urgente</span>}
+                              <span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{proc.referencia}</span>
                             </div>
-                            <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proceso.entidad || "Proceso"}</h3>
+                            <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proc.entidad || "—"}</h3>
                           </div>
                           <div className="text-right flex-shrink-0">
-                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso.presupuesto)}</div>
+                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proc.presupuesto)}</div>
                             <div className="flex flex-col items-end">
                               <div className="flex items-center justify-end gap-1 mt-1">
                                 <Clock size={12} className="text-gray-500" />
-                                <span className={`text-[11px] font-mono ${urgente ? "text-amber-600 dark:text-amber-400" : "text-gray-500"}`}>
-                                  Cierra en {dias}d
-                                </span>
+                                <span className={`text-[11px] font-mono ${urgente ? "text-amber-600 dark:text-amber-400" : "text-gray-500"}`}>Cierra en {dias}d</span>
                               </div>
-                              <div className="text-[9px] text-gray-400 font-mono">{formatFechaCorta(proceso.fecha_oferta)}</div>
+                              <div className="text-[9px] text-gray-400 font-mono">{formatFechaCorta(proc.fecha_oferta)}</div>
                             </div>
                             <div className="flex items-center justify-end gap-2 mt-1">
-                              <div className={`text-[10px] px-2 py-1 rounded-full ${(proceso.estado_acompanamiento || 'pendiente') === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : proceso.estado_acompanamiento === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
-                                {proceso.estado_acompanamiento === 'pendiente' ? 'Pendiente' : proceso.estado_acompanamiento === 'en_proceso' ? 'En proceso' : 'Atendida'}
+                              <div className={`text-[10px] px-2 py-1 rounded-full ${proc.estado_acompanamiento === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : proc.estado_acompanamiento === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
+                                {proc.estado_acompanamiento === 'pendiente' ? 'Pendiente' : proc.estado_acompanamiento === 'en_proceso' ? 'En proceso' : 'Atendida'}
                               </div>
-                              <button onClick={() => setCollapsedCards(prev => ({ ...prev, [proceso.id]: !prev[proceso.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
+                              <button onClick={() => setCollapsedCards(prev => ({ ...prev, [proc.id]: !prev[proc.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
                                 {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
                               </button>
                             </div>
@@ -479,18 +496,18 @@ export default function PortalCliente() {
                         {!isCollapsed && (
                           <>
                             <div className="mt-3">
-                              <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">{proceso.objeto || "Sin descripción"}</p>
+                              <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">{proc.objeto || "Sin descripción"}</p>
                               <div className="flex flex-wrap gap-2 mt-2">
-                                {proceso.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {proceso.departamento}</span>}
-                                {proceso.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {proceso.modalidad}</span>}
-                                {proceso.resultado_ia && <span className="text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md">✓ IA</span>}
-                                {proceso.url && <a href={proceso.url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}
+                                {proc.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {proc.departamento}</span>}
+                                {proc.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {proc.modalidad}</span>}
+                                {proc.resultado_ia && <span className="text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md">✓ IA</span>}
+                                {proc.url && <a href={proc.url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}
                               </div>
                             </div>
                             <div className="border-t border-gray-200 dark:border-gray-800 mt-4 pt-3">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span>
-                                <button onClick={() => setHideDetails(prev => ({ ...prev, [proceso.id]: !prev[proceso.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">
+                                <button onClick={() => setHideDetails(prev => ({ ...prev, [proc.id]: !prev[proc.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">
                                   {isDetailsHidden ? <Eye size={12} /> : <EyeOff size={12} />}
                                   {isDetailsHidden ? "Mostrar" : "Ocultar"}
                                 </button>
@@ -498,9 +515,9 @@ export default function PortalCliente() {
                               {!isDetailsHidden && (
                                 <>
                                   <Timeline etapa={etapaActual} />
-                                  {proceso[`fecha_etapa_${etapaActual}`] && (
+                                  {proc[`fecha_etapa_${etapaActual}`] && (
                                     <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500 flex items-center gap-2">
-                                      <Calendar size={12} /> Fecha registrada: {new Date(proceso[`fecha_etapa_${etapaActual}`]).toLocaleString()}
+                                      <Calendar size={12} /> Fecha registrada: {new Date(proc[`fecha_etapa_${etapaActual}`]).toLocaleString()}
                                     </div>
                                   )}
                                   <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500">
@@ -509,7 +526,7 @@ export default function PortalCliente() {
                                   <div className="mt-4">
                                     <span className="text-[11px] font-bold text-blue-600 flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
                                     <div className="space-y-2 max-h-32 overflow-y-auto mb-2">
-                                      {(comentariosProceso[proceso.id] || []).map(c => (
+                                      {(comentariosProceso[proc.id] || []).map(c => (
                                         <div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500' : 'bg-gray-100 dark:bg-gray-800'}`}>
                                           <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-500 mb-1">
                                             <span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Tú'}</span>
@@ -520,8 +537,8 @@ export default function PortalCliente() {
                                       ))}
                                     </div>
                                     <div className="flex gap-2">
-                                      <textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentario[proceso.id] || ""} onChange={e => setNuevoComentario(prev => ({ ...prev, [proceso.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentario(proceso.id) } }} />
-                                      <button onClick={() => enviarComentario(proceso.id)} disabled={enviandoComentario[proceso.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button>
+                                      <textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentario[proc.id] || ""} onChange={e => setNuevoComentario(prev => ({ ...prev, [proc.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentario(proc.id) } }} />
+                                      <button onClick={() => enviarComentario(proc.id)} disabled={enviandoComentario[proc.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button>
                                     </div>
                                   </div>
                                 </>
@@ -536,11 +553,15 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA NUEVOS / INTERESES */}
+            {/* PESTAÑA NUEVOS / INTERESES (procesos SIN en_acompanamiento) */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
-                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-4xl mb-2">{tab === "interesado" ? "⭐" : "📋"}</div><div className="text-gray-900 dark:text-white font-medium">No hay procesos para mostrar</div><div className="text-xs text-gray-500">Los procesos enviados a acompañamiento están en su propia pestaña.</div></div>
+                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800">
+                    <div className="text-4xl mb-2">{tab === "interesado" ? "⭐" : "📋"}</div>
+                    <div className="text-gray-900 dark:text-white font-medium">No hay procesos para mostrar</div>
+                    <div className="text-xs text-gray-500">Los procesos enviados a acompañamiento están en su propia pestaña.</div>
+                  </div>
                 ) : (
                   listaActual.map(p => {
                     const dias = diasRestantes(p.fecha_oferta), urgente = dias !== null && dias <= 3 && dias >= 0, isInt = p.estado === "interesado", isSaving = saving[p.id], isSaliendo = saliendo[p.id]
@@ -565,7 +586,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* DESCARTADOS */}
+            {/* DESCARTADOS (sin cambios) */}
             {tab === "descartados" && (
               <div className="space-y-3">
                 {descartados.length === 0 ? (<div className="text-center py-16 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-5xl mb-4">🗑</div><div className="text-[15px] font-semibold text-gray-900 dark:text-white mb-2">Sin procesos descartados</div><div className="text-[13px] text-gray-500">Se eliminan automáticamente después de 30 días.</div></div>) : (
@@ -575,7 +596,7 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA */}
+          {/* COLUMNA DERECHA (sin cambios) */}
           <div className="lg:col-span-3 space-y-5">
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
