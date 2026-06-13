@@ -90,7 +90,8 @@ export default function PortalCliente() {
   const id = params.id as string
 
   const [cliente, setCliente] = useState<Cliente | null>(null)
-  const [procesos, setProcesos] = useState<Proceso[]>([])
+  const [procesos, setProcesos] = useState<Proceso[]>([])       // para pestañas Nuevos/Intereses (excluye los que están en acompañamiento activo)
+  const [todosProcesos, setTodosProcesos] = useState<Proceso[]>([]) // todos los procesos del cliente (sin exclusión)
   const [descartados, setDescartados] = useState<Proceso[]>([])
   const [solicitudes, setSolicitudes] = useState<SolicitudAcompanamiento[]>([])
   const [loading, setLoading] = useState(true)
@@ -141,19 +142,47 @@ export default function PortalCliente() {
     if (ce || !c) { setError("Cliente no encontrado."); setLoading(false); return }
     setCliente(c)
 
+    // Limpiar vencidos
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "nuevo").lt("fecha_oferta", new Date().toISOString())
     const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
+    // Obtener todas las solicitudes
     const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id)
     setSolicitudes(sol || [])
 
-    const idsExcluir = (sol || []).filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso').map(s => s.proceso_id).filter(Boolean) as string[]
+    // IDs de procesos que tienen solicitud activa (pendiente o en_proceso) para excluirlos de la lista "procesos"
+    const idsExcluir = (sol || [])
+      .filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso')
+      .map(s => s.proceso_id)
+      .filter(Boolean) as string[]
+
     const hoy = new Date().toISOString()
-    let query = supabase.from("procesos").select("*").eq("cliente_id", id).neq("estado", "descartado").or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`).order("fecha_oferta", { ascending: true })
-    if (idsExcluir.length > 0) query = query.not("id", "in", `(${idsExcluir.join(",")})`)
+    // Primero obtener TODOS los procesos del cliente (sin exclusión) para usarlos en las tarjetas de acompañamiento
+    const { data: allProcesos } = await supabase
+      .from("procesos")
+      .select("*")
+      .eq("cliente_id", id)
+      .neq("estado", "descartado")
+      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
+      .order("fecha_oferta", { ascending: true })
+    setTodosProcesos(allProcesos || [])
+
+    // Luego obtener la lista filtrada (excluyendo los que están en acompañamiento activo)
+    let query = supabase
+      .from("procesos")
+      .select("*")
+      .eq("cliente_id", id)
+      .neq("estado", "descartado")
+      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
+      .order("fecha_oferta", { ascending: true })
+
+    if (idsExcluir.length > 0) {
+      query = query.not("id", "in", `(${idsExcluir.join(",")})`)
+    }
     const { data: p } = await query
     setProcesos(p || [])
+
     const { data: desc } = await supabase.from("procesos").select("*").eq("cliente_id", id).eq("estado", "descartado").order("updated_at", { ascending: false })
     setDescartados(desc || [])
 
@@ -172,13 +201,14 @@ export default function PortalCliente() {
     await supabase.from("procesos").update({ estado: "interesado", etapa_seguimiento: 0 }).eq("id", procesoId)
     await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "interesado" }])
     setProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
+    setTodosProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
     mostrarToast("✓ Interés registrado", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
-    const proc = procesos.find(x => x.id === procesoId)
+    const proc = todosProcesos.find(x => x.id === procesoId)
     if (!proc) return
     setSaving(prev => ({ ...prev, [procesoId]: "acompanamiento" }))
     const { error } = await supabase.from("solicitudes_acompanamiento").insert({
@@ -200,7 +230,11 @@ export default function PortalCliente() {
       await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
       await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
       setDescartados(prev => [{ ...p, estado: "descartado" }, ...prev])
-      setTimeout(() => { setProcesos(prev => prev.filter(x => x.id !== procesoId)); setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n }) }, 320)
+      setTimeout(() => {
+        setProcesos(prev => prev.filter(x => x.id !== procesoId))
+        setTodosProcesos(prev => prev.filter(x => x.id !== procesoId))
+        setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n })
+      }, 320)
       mostrarToast("Proceso descartado", "info")
     }
   }
@@ -208,7 +242,10 @@ export default function PortalCliente() {
   async function restaurar(procesoId: string) {
     await supabase.from("procesos").update({ estado: "nuevo", updated_at: new Date().toISOString() }).eq("id", procesoId)
     const p = descartados.find(x => x.id === procesoId)
-    if (p) setProcesos(prev => [{ ...p, estado: "nuevo" }, ...prev])
+    if (p) {
+      setProcesos(prev => [{ ...p, estado: "nuevo" }, ...prev])
+      setTodosProcesos(prev => [{ ...p, estado: "nuevo" }, ...prev])
+    }
     setDescartados(prev => prev.filter(x => x.id !== procesoId))
     mostrarToast("Proceso restaurado", "ok")
     setTab("nuevos")
@@ -237,26 +274,25 @@ export default function PortalCliente() {
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
   function limpiarFiltros() { setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("") }
 
-  // Datos para gráficos
-  const nuevos = procesos.filter(p => p.estado === "nuevo")
-  const interesados = procesos.filter(p => p.estado === "interesado")
+  // Datos para gráficos (usamos todosProcesos para que incluya los de acompañamiento)
+  const nuevos = todosProcesos.filter(p => p.estado === "nuevo")
+  const interesados = todosProcesos.filter(p => p.estado === "interesado")
   const solicitudesActivas = solicitudes.filter(s => s.estado === "pendiente" || s.estado === "en_proceso")
   const idsEnAcompanamiento = solicitudesActivas.map(s => s.proceso_id).filter(Boolean)
-  const presAcompanamiento = procesos.filter(p => idsEnAcompanamiento.includes(p.id)).reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
+  const presAcompanamiento = todosProcesos.filter(p => idsEnAcompanamiento.includes(p.id)).reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presInteresados = interesados.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
-  // Tendencia
+  // Tendencia (con todosProcesos)
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
-  const procesosTendencia = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
+  const procesosTendencia = todosProcesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
   procesosTendencia.forEach(p => {
     const fechaKey = new Date(p.fecha_oferta!).toISOString().split('T')[0]
     tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1)
   })
   let tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
-  // Línea de tendencia
   let trendData: { fecha: string; trend: number | null }[] = []
   if (tendenciaData.length >= 2) {
     const n = tendenciaData.length
@@ -274,16 +310,16 @@ export default function PortalCliente() {
   }
 
   const deptoMap = new Map<string, number>()
-  procesos.forEach(p => { if (p.departamento) deptoMap.set(p.departamento, (deptoMap.get(p.departamento) || 0) + 1) })
+  todosProcesos.forEach(p => { if (p.departamento) deptoMap.set(p.departamento, (deptoMap.get(p.departamento) || 0) + 1) })
   const deptoData = Array.from(deptoMap.entries()).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0,5)
 
   const entidadMap = new Map<string, number>()
-  procesos.forEach(p => { if (p.entidad) entidadMap.set(p.entidad, (entidadMap.get(p.entidad) || 0) + Number(p.presupuesto || 0)) })
+  todosProcesos.forEach(p => { if (p.entidad) entidadMap.set(p.entidad, (entidadMap.get(p.entidad) || 0) + Number(p.presupuesto || 0)) })
   const topEntidades = Array.from(entidadMap.entries()).map(([name, total]) => ({ name, total })).sort((a,b) => b.total - a.total).slice(0,5)
 
-  const deptos = [...new Set(procesos.map(p => p.departamento).filter(Boolean))].sort()
-  const entidades = [...new Set(procesos.map(p => p.entidad).filter(Boolean))].sort()
-  const modalidades = [...new Set(procesos.map(p => p.modalidad).filter(Boolean))].sort()
+  const deptos = [...new Set(todosProcesos.map(p => p.departamento).filter(Boolean))].sort()
+  const entidades = [...new Set(todosProcesos.map(p => p.entidad).filter(Boolean))].sort()
+  const modalidades = [...new Set(todosProcesos.map(p => p.modalidad).filter(Boolean))].sort()
   const listaBase = tab === "nuevos" ? nuevos : tab === "interesado" ? interesados : []
   const listaActual = listaBase.filter(p => {
     if (fDepto && p.departamento !== fDepto) return false
@@ -426,7 +462,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* ========== PESTAÑA ACOMPAÑAMIENTO CON DISEÑO UNIFICADO ========== */}
+            {/* PESTAÑA ACOMPAÑAMIENTO - usando todosProcesos para obtener los datos del proceso */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
@@ -437,7 +473,8 @@ export default function PortalCliente() {
                   </div>
                 ) : (
                   solicitudes.map(sol => {
-                    const proceso = procesos.find(p => p.id === sol.proceso_id) || descartados.find(p => p.id === sol.proceso_id)
+                    // Buscar el proceso en TODOS los procesos (todosProcesos) o en descartados
+                    const proceso = todosProcesos.find(p => p.id === sol.proceso_id) || descartados.find(p => p.id === sol.proceso_id)
                     if (!comentariosSolicitud[sol.id]) cargarComentariosSolicitud(sol.id)
                     const etapaActual = sol.etapa_actual ?? 0
                     const nombreEtapa = sol.etapa_nombre || ETAPAS[etapaActual]
@@ -445,7 +482,7 @@ export default function PortalCliente() {
                     const isDetailsHidden = hideDetails[sol.id] || false
                     return (
                       <div key={sol.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
-                        {/* Cabecera: igual que en Nuevos/Intereses */}
+                        {/* Cabecera con presupuesto grande a la derecha */}
                         <div className="flex justify-between items-start gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -454,7 +491,6 @@ export default function PortalCliente() {
                             <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proceso?.entidad || "Proceso"}</h3>
                           </div>
                           <div className="text-right flex-shrink-0">
-                            {/* Presupuesto grande */}
                             <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
                               {fmt(proceso?.presupuesto)}
                             </div>
@@ -469,7 +505,6 @@ export default function PortalCliente() {
                           </div>
                         </div>
 
-                        {/* Contenido colapsable (detalles, timeline, comentarios) */}
                         {!isCollapsed && (
                           <>
                             {/* Descripción y metadatos */}
@@ -529,7 +564,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA NUEVOS / INTERESES (sin cambios, ya funciona bien) */}
+            {/* PESTAÑA NUEVOS / INTERESES (usando la lista filtrada procesos) */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
@@ -583,7 +618,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* DESCARTADOS (sin cambios) */}
+            {/* DESCARTADOS */}
             {tab === "descartados" && (
               <div className="space-y-3">
                 {descartados.length === 0 ? (<div className="text-center py-16 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-5xl mb-4">🗑</div><div className="text-[15px] font-semibold text-gray-900 dark:text-white mb-2">Sin procesos descartados</div><div className="text-[13px] text-gray-500">Se eliminan automáticamente después de 30 días.</div></div>) : (
@@ -593,12 +628,12 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA - MÉTRICAS */}
+          {/* COLUMNA DERECHA */}
           <div className="lg:col-span-3 space-y-5">
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
               <div className="space-y-2">
-                {[...procesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}
+                {[...todosProcesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}
               </div>
             </div>
             {topEntidades.length > 0 && (
@@ -609,7 +644,7 @@ export default function PortalCliente() {
             )}
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2>
-              <div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{procesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div>
+              <div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{todosProcesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div>
             </div>
             {cliente?.drive_url && (<a href={cliente.drive_url} target="_blank" rel="noreferrer" className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-4 flex items-center gap-3 hover:shadow-sm transition-all"><FolderOpen size={18} className="text-blue-600" /><div><p className="text-[12px] font-medium text-gray-900 dark:text-white">Google Drive</p><p className="text-[10px] text-gray-500">Mis documentos</p></div></a>)}
           </div>
