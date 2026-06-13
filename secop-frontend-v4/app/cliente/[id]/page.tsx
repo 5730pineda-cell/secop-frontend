@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import type { Cliente, Proceso } from "@/types"
+import type { Cliente, Proceso, Comentario } from "@/types"
 import {
   LineChart,
   Line,
@@ -39,6 +39,9 @@ import {
   Filter,
   DollarSign,
   BarChart as BarChartIcon,
+  MessageSquare,
+  HelpCircle,
+  Calendar,
 } from "lucide-react"
 
 // ---------- HELPERS ----------
@@ -189,6 +192,14 @@ export default function PortalCliente() {
   const [fTexto, setFTexto] = useState("")
   const [searchTerm, setSearchTerm] = useState("")
 
+  // ========== NUEVOS ESTADOS ==========
+  const [solicitudForm, setSolicitudForm] = useState({ empresa: "", numero_proceso: "", enlace: "", observaciones: "" })
+  const [enviandoSolicitud, setEnviandoSolicitud] = useState(false)
+  const [showSolicitudModal, setShowSolicitudModal] = useState(false)
+  const [comentariosMap, setComentariosMap] = useState<Record<string, Comentario[]>>({})
+  const [nuevoComentario, setNuevoComentario] = useState<Record<string, string>>({})
+  const [enviandoComentario, setEnviandoComentario] = useState<Record<string, boolean>>({})
+
   useEffect(() => { if (!id) return; cargar() }, [id])
 
   async function cargar() {
@@ -217,6 +228,58 @@ export default function PortalCliente() {
     }
   }
 
+  // ========== NUEVAS FUNCIONES ==========
+  async function cargarComentarios(procesoId: string) {
+    const { data } = await supabase
+      .from("comentarios")
+      .select("*")
+      .eq("proceso_id", procesoId)
+      .order("created_at", { ascending: true })
+    if (data) setComentariosMap(prev => ({ ...prev, [procesoId]: data }))
+  }
+
+  async function enviarComentario(procesoId: string) {
+    const texto = nuevoComentario[procesoId]?.trim()
+    if (!texto) return
+    setEnviandoComentario(prev => ({ ...prev, [procesoId]: true }))
+    await supabase.from("comentarios").insert({
+      proceso_id: procesoId,
+      cliente_id: id,
+      autor: "cliente",
+      texto
+    })
+    await cargarComentarios(procesoId)
+    setNuevoComentario(prev => ({ ...prev, [procesoId]: "" }))
+    setEnviandoComentario(prev => ({ ...prev, [procesoId]: false }))
+    mostrarToast("Comentario enviado.", "ok")
+  }
+
+  async function enviarSolicitudAcompanamiento(e: React.FormEvent) {
+    e.preventDefault()
+    if (!solicitudForm.empresa || !solicitudForm.numero_proceso || !solicitudForm.enlace) {
+      mostrarToast("Completa empresa, número de proceso y enlace.", "error")
+      return
+    }
+    setEnviandoSolicitud(true)
+    const { error } = await supabase.from("solicitudes_acompanamiento").insert({
+      cliente_id: id,
+      empresa: solicitudForm.empresa,
+      numero_proceso: solicitudForm.numero_proceso,
+      enlace: solicitudForm.enlace,
+      observaciones: solicitudForm.observaciones || null,
+      estado: "pendiente"
+    })
+    setEnviandoSolicitud(false)
+    if (error) {
+      mostrarToast("Error al enviar: " + error.message, "error")
+    } else {
+      mostrarToast("Solicitud enviada. El equipo OC te contactará pronto.", "ok")
+      setSolicitudForm({ empresa: "", numero_proceso: "", enlace: "", observaciones: "" })
+      setShowSolicitudModal(false)
+    }
+  }
+
+  // Funciones existentes
   async function marcarInteres(procesoId: string) {
     if (saving[procesoId]) return
     setSaving(prev => ({ ...prev, [procesoId]: true }))
@@ -308,7 +371,6 @@ export default function PortalCliente() {
   if (loading) return ( <div className="min-h-screen bg-[#0B132B] flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00B0FF]"></div></div> )
   if (error) return ( <div className="min-h-screen bg-[#0B132B] flex items-center justify-center text-red-500">{error}</div> )
 
-  // Tooltip style mejorado
   const tooltipStyle = {
     backgroundColor: '#1C2538',
     border: '1px solid #2A3441',
@@ -357,6 +419,7 @@ export default function PortalCliente() {
           </div>
           <div className="flex items-center gap-4">
             <div className="relative"><input type="text" placeholder="Buscar proceso..." className="bg-[#0F1622] border border-[#1C2538] rounded-lg pl-8 pr-3 py-1.5 text-[12px] text-white placeholder:text-[#5A647A] focus:outline-none focus:border-[#00B0FF] transition-all w-40 md:w-56" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /><Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#5A647A]" /></div>
+            <button onClick={() => setShowSolicitudModal(true)} className="flex items-center gap-1 text-xs bg-[#00B0FF] hover:bg-[#0091EA] px-3 py-1.5 rounded-lg text-white font-medium transition-all"><HelpCircle size={14} /> Solicitar acompañamiento</button>
             <button className="text-[#5A647A] hover:text-[#00B0FF] transition-all relative" onClick={() => mostrarToast("🔔 No hay notificaciones nuevas", "info")}><Bell size={18} /><span className="absolute -top-1 -right-1 w-2 h-2 bg-[#FF5252] rounded-full"></span></button>
             <div className="flex items-center gap-3 pl-3 border-l border-[#1C2538]">
               {cliente && (<><div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#00B0FF] to-[#00E676] flex items-center justify-center text-[#0B132B] font-bold text-sm">{(cliente.nombre || "").split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase()}</div><div className="hidden sm:block"><p className="text-white text-[13px] font-medium">{cliente.nombre.split(" ").slice(0, 2).join(" ")}</p><p className="text-[10px] text-[#5A647A]">{cliente.email_destinatario || "cliente@occonsultores.com"}</p></div></>)}
@@ -371,7 +434,6 @@ export default function PortalCliente() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* COLUMNA IZQUIERDA (3/12) - Gráficos */}
           <div className="lg:col-span-3 space-y-6">
-            {/* Tendencia real */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2"><TrendingUp size={16} className="text-[#00B0FF]" /><h2 className="text-[13px] font-bold text-white uppercase tracking-wider">Tendencia de Procesos</h2></div><span className="text-[10px] text-[#5A647A] font-mono">Últimos 30 días</span></div>
               <div className="h-[180px] w-full">
@@ -387,7 +449,6 @@ export default function PortalCliente() {
               </div>
             </div>
 
-            {/* Gráfico de barras: Procesos por departamento */}
             {procesosPorDepto.length > 0 && (
               <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
                 <div className="flex items-center gap-2 mb-4"><BarChartIcon size={16} className="text-[#00E676]" /><h2 className="text-[13px] font-bold text-white uppercase tracking-wider">Procesos por Depto.</h2></div>
@@ -404,7 +465,6 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* Dona de presupuesto */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <div className="flex items-center gap-2 mb-4"><PieChartIcon size={16} className="text-[#00E676]" /><h2 className="text-[13px] font-bold text-white uppercase tracking-wider">Distribución presupuestaria</h2></div>
               <div className="h-[180px] w-full">
@@ -422,7 +482,7 @@ export default function PortalCliente() {
             </div>
           </div>
 
-          {/* COLUMNA CENTRAL (6/12) - Procesos (sin cambios en estructura) */}
+          {/* COLUMNA CENTRAL (6/12) - Procesos */}
           <div className="lg:col-span-6 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Zap size={18} className="text-[#00E676]" />{tab === "nuevos" ? "Procesos Nuevos" : tab === "interesado" ? "Mis Intereses" : "Descartados"}</h2>{tab !== "descartados" && (<button onClick={() => setFiltroPanel(!filtroPanel)} className={`flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-medium transition-all ${filtrosActivos > 0 ? "bg-[#00B0FF] text-white" : "bg-[#1C2538] text-[#A0A8B8] hover:bg-[#2A3441]"}`}><Filter size={12} /> Filtrar {filtrosActivos > 0 && `(${filtrosActivos})`}</button>)}</div>
@@ -450,13 +510,62 @@ export default function PortalCliente() {
               <div className="space-y-4 animate-fadeIn">
                 {listaActual.map((p) => {
                   const dias = diasRestantes(p.fecha_oferta); const urgente = dias !== null && dias <= 3 && dias >= 0; const isInt = p.estado === "interesado"; const isSaving = saving[p.id]; const isSaliendo = saliendo[p.id]; const etapa = p.etapa_seguimiento ?? 0
+                  // Cargar comentarios si es interesado y no están cargados
+                  if (isInt && !comentariosMap[p.id]) {
+                    cargarComentarios(p.id)
+                  }
                   return (
                     <div key={p.id} className={`proc-card bg-[#0F1622] rounded-xl border transition-all duration-300 ${isSaliendo ? "saliendo" : ""} ${isInt ? "border-[#00B0FF40]" : urgente ? "border-[#FF525240]" : "border-[#1C2538]"}`}>
                       <div className="p-5">
                         <div className="flex justify-between items-start gap-4"><div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="text-[10px] font-mono text-[#00B0FF] bg-[#00B0FF10] px-2 py-0.5 rounded-full">{p.referencia}</span>{urgente && <span className="text-[10px] font-mono text-[#FF5252] bg-[#FF525210] px-2 py-0.5 rounded-full animate-pulse">⚡ Cierre urgente</span>}</div><h3 className="text-[15px] font-bold text-white mt-2 tracking-tight">{p.entidad || "—"}</h3></div><div className="text-right flex-shrink-0"><div className="text-[22px] font-black text-[#00E676] font-mono tracking-tight">{fmt(p.presupuesto)}</div><div className="flex items-center justify-end gap-1 mt-1"><Clock size={12} className="text-[#5A647A]" /><span className={`text-[11px] font-mono ${urgente ? "text-[#FF5252]" : "text-[#5A647A]"}`}>Cierra en {dias}d</span></div></div></div>
                         <p className="text-[13px] text-[#A0A8B8] leading-relaxed mt-3 line-clamp-2">{p.objeto || "Sin descripción"}</p>
                         <div className="flex flex-wrap gap-2 mt-3">{p.departamento && <span className="flex items-center gap-1 text-[11px] text-[#5A647A] bg-[#1C2538] px-2 py-1 rounded-md"><MapPin size={10} /> {p.departamento}</span>}{p.modalidad && <span className="flex items-center gap-1 text-[11px] text-[#5A647A] bg-[#1C2538] px-2 py-1 rounded-md"><Briefcase size={10} /> {p.modalidad}</span>}{p.resultado_ia && <span className="text-[11px] text-[#00E676] bg-[#00E67610] px-2 py-1 rounded-md">✓ IA</span>}{isInt && <span className="text-[11px] text-[#00B0FF] bg-[#00B0FF10] px-2 py-1 rounded-md border border-[#00B0FF30]">✓ Me interesa</span>}</div>
+                        
                         {isInt && (<div className="mt-4 pt-3 border-t border-[#1C2538]"><div className="flex justify-between items-center mb-2"><span className="text-[11px] font-bold text-[#00B0FF] uppercase tracking-wider">Seguimiento de gestión</span><span className="text-[10px] font-mono text-[#00E676] bg-[#00E67610] px-2 py-0.5 rounded-full">{ETAPAS[etapa]}</span></div><Timeline etapa={etapa} /><div className="mt-3 p-3 bg-[#1C2538] rounded-lg text-[12px] text-[#A0A8B8]">{etapa === 0 ? "Usa \"Enviar a SOFIA\" para que el equipo inicie el análisis formal." : `Estamos en la etapa ${ETAPAS[etapa]}. OC Consultores te mantendrá informado.`}</div></div>)}
+
+                        {/* Sección de comentarios (solo en procesos interesados) */}
+                        {isInt && (
+                          <div className="mt-4 pt-3 border-t border-[#1C2538]">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-[11px] font-bold text-[#00B0FF] uppercase tracking-wider flex items-center gap-1"><MessageSquare size={12}/> Comentarios</span>
+                              {p.resultado_final && (
+                                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${p.resultado_final === 'ganado' ? 'bg-[#00E67620] text-[#00E676]' : p.resultado_final === 'perdido' ? 'bg-red-500/20 text-red-400' : 'bg-[#FFB74D20] text-[#FFB74D]'}`}>
+                                  {p.resultado_final === 'ganado' ? '🏆 GANADO' : p.resultado_final === 'perdido' ? '❌ Perdido' : '⚠️ Desierto'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
+                              {(comentariosMap[p.id] || []).map(c => (
+                                <div key={c.id} className={`text-xs p-2 rounded-lg ${c.autor === 'admin' ? 'bg-[#00B0FF10] border-l-2 border-[#00B0FF]' : 'bg-[#1C2538]'}`}>
+                                  <div className="flex justify-between text-[10px] text-[#5A647A] mb-1">
+                                    <span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Tú'}</span>
+                                    <span>{new Date(c.created_at).toLocaleString()}</span>
+                                  </div>
+                                  <p className="text-white/80">{c.texto}</p>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex gap-2 mt-2">
+                              <textarea
+                                rows={1}
+                                placeholder="Escribe un comentario o consulta..."
+                                className="flex-1 p-2 bg-[#1C2538] rounded text-white text-xs resize-none"
+                                value={nuevoComentario[p.id] || ""}
+                                onChange={e => setNuevoComentario(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentario(p.id) } }}
+                              />
+                              <button onClick={() => enviarComentario(p.id)} disabled={enviandoComentario[p.id]} className="px-3 py-1.5 bg-[#00B0FF] rounded text-white text-xs font-bold"><Send size={12}/></button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Fecha esperada de informe si existe */}
+                        {p.fecha_informe_evaluacion && (
+                          <div className="mt-2 text-[11px] text-[#FFB74D] bg-[#FFB74D10] p-2 rounded flex items-center gap-2">
+                            <Calendar size={12} /> Fecha estimada de informe: {new Date(p.fecha_informe_evaluacion).toLocaleDateString()}
+                          </div>
+                        )}
+
                         <div className="flex flex-wrap items-center gap-2 pt-4 border-t border-[#1C2538] mt-3">
                           {!isInt && (<button className="btn flex items-center gap-2 bg-[#00E67620] hover:bg-[#00E67630] text-[#00E676] text-[12px] font-bold px-4 py-2 rounded-lg transition-all" onClick={() => marcarInteres(p.id)} disabled={!!isSaving}>{isSaving && isSaving !== "sofia" ? "..." : "✓ Me interesa"}</button>)}
                           <button className="btn flex items-center gap-2 bg-gradient-to-r from-[#00B0FF] to-[#0091EA] hover:from-[#0091EA] hover:to-[#0077B6] text-white text-[12px] font-bold px-4 py-2 rounded-lg transition-all shadow-md" onClick={() => enviarSOFIA(p.id)} disabled={isSaving === "sofia"}><Send size={14} /> {isSaving === "sofia" ? "Enviando..." : "Enviar a SOFIA"}</button>
@@ -479,13 +588,11 @@ export default function PortalCliente() {
 
           {/* COLUMNA DERECHA (3/12) */}
           <div className="lg:col-span-3 space-y-6">
-            {/* Top Oportunidades */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={14} className="text-[#00E676]" />Top Oportunidades</h2>
               <div className="space-y-3">{[...procesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta); return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-[#1C2538] transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-[#00E676]">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-[#FF5252]":"text-[#5A647A]"}`}>⏳ {dias}d</span>}</div></div><ExternalLink size={14} className="text-[#5A647A] group-hover:text-[#00B0FF] transition-colors" /></a>)})}</div>
             </div>
 
-            {/* Top Entidades por presupuesto */}
             {topEntidades.length > 0 && (
               <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
                 <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2"><BarChartIcon size={14} className="text-[#00E676]" />Top Entidades por Presupuesto</h2>
@@ -493,13 +600,11 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* Actividad Reciente */}
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={14} className="text-[#00B0FF]" />Actividad Reciente</h2>
               <div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-[#1C2538]"><div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-[#00B0FF]" /></div><div><p className="text-[12px] text-white">Portal actualizado</p><p className="text-[11px] text-[#5A647A]">Nuevos procesos cargados</p><span className="text-[9px] text-[#2A3441] font-mono">hoy</span></div></div><div className="flex items-start gap-3 pb-3 border-b border-[#1C2538]"><div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><Send size={12} className="text-[#00E676]" /></div><div><p className="text-[12px] text-white">Análisis IA completado</p><p className="text-[11px] text-[#5A647A]">{procesos.length} procesos evaluados</p><span className="text-[9px] text-[#2A3441] font-mono">hace 1h</span></div></div>{interesados.length > 0 && (<div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><StarIcon size={12} className="text-[#FFD600]" /></div><div><p className="text-[12px] text-white">{interesados.length} proceso(s) marcados</p><p className="text-[11px] text-[#5A647A]">Como "Me interesa"</p><span className="text-[9px] text-[#2A3441] font-mono">reciente</span></div></div>)}</div>
             </div>
 
-            {/* Etapas de los interesados */}
             {etapasInteresados.length > 0 && (
               <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
                 <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3">Etapas de Interés</h2>
@@ -507,7 +612,6 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* Mis Herramientas */}
             <div className="bg-gradient-to-br from-[#0F1622] to-[#0B132B] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3">Mis Herramientas</h2>
               <div className="grid grid-cols-3 gap-2">
@@ -529,6 +633,25 @@ export default function PortalCliente() {
 
       {/* MODAL DESCARTAR */}
       {procesoADescartar && (<div className="fixed inset-0 bg-[#0B132B]/80 z-[200] flex items-center justify-center p-5 backdrop-blur-sm" onClick={() => setProcesoADescartar(null)}><div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-6 max-w-md w-full" onClick={e => e.stopPropagation()}><div className="text-center mb-4"><div className="w-14 h-14 rounded-full bg-[#FF525220] border border-[#FF525240] flex items-center justify-center mx-auto mb-4 text-2xl">⚠</div><h3 className="text-lg font-bold text-white mb-2">¿Descartar proceso?</h3><p className="text-[13px] text-[#A0A8B8]">Pasará a tu carpeta de Descartados y podrás recuperarlo cuando quieras.</p><div className="mt-4 p-3 bg-[#1C2538] rounded-lg"><div className="text-[13px] font-medium text-white">{procesoADescartar.entidad || "—"}</div><div className="text-[11px] text-[#5A647A] font-mono">{procesoADescartar.referencia}</div></div></div><div className="flex gap-3"><button onClick={() => setProcesoADescartar(null)} className="flex-1 py-2.5 rounded-lg bg-[#1C2538] text-[#A0A8B8] text-[13px] font-medium hover:bg-[#2A3441] transition-all">Cancelar</button><button onClick={() => descartar(procesoADescartar.id)} className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-[#FF5252] to-[#DC2626] text-white text-[13px] font-bold hover:opacity-90 transition-all">Sí, descartar</button></div></div></div>)}
+
+      {/* MODAL SOLICITUD ACOMPAÑAMIENTO */}
+      {showSolicitudModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setShowSolicitudModal(false)}>
+          <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><FileText size={18} className="text-[#00B0FF]"/> Nueva solicitud de acompañamiento</h3>
+            <form onSubmit={enviarSolicitudAcompanamiento} className="space-y-4">
+              <input required type="text" placeholder="Nombre de tu empresa *" className="w-full p-2 bg-[#1C2538] rounded text-white text-sm" value={solicitudForm.empresa} onChange={e => setSolicitudForm({...solicitudForm, empresa: e.target.value})} />
+              <input required type="text" placeholder="Número del proceso SECOP *" className="w-full p-2 bg-[#1C2538] rounded text-white text-sm" value={solicitudForm.numero_proceso} onChange={e => setSolicitudForm({...solicitudForm, numero_proceso: e.target.value})} />
+              <input required type="url" placeholder="Enlace al SECOP *" className="w-full p-2 bg-[#1C2538] rounded text-white text-sm" value={solicitudForm.enlace} onChange={e => setSolicitudForm({...solicitudForm, enlace: e.target.value})} />
+              <textarea placeholder="Observaciones adicionales (opcional)" rows={3} className="w-full p-2 bg-[#1C2538] rounded text-white text-sm" value={solicitudForm.observaciones} onChange={e => setSolicitudForm({...solicitudForm, observaciones: e.target.value})} />
+              <div className="flex gap-2 justify-end">
+                <button type="button" onClick={() => setShowSolicitudModal(false)} className="px-3 py-1.5 bg-[#1C2538] rounded text-white text-sm">Cancelar</button>
+                <button type="submit" disabled={enviandoSolicitud} className="px-3 py-1.5 bg-[#00B0FF] rounded text-white font-bold text-sm">{enviandoSolicitud ? "Enviando..." : "Enviar solicitud"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {showBienvenida && <BienvenidaToast nombre={cliente?.nombre || ""} onClose={() => setShowBienvenida(false)} />}
     </div>
