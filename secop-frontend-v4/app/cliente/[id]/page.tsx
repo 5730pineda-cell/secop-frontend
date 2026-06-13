@@ -9,7 +9,7 @@ import {
 import {
   Bell, Search, LogOut, ExternalLink, Send, FolderOpen, Archive,
   Clock, PieChart as PieChartIcon, Zap, CheckCircle, MapPin, Briefcase,
-  Filter, DollarSign, BarChart as BarChartIcon, MessageSquare, HelpCircle,
+  Filter, DollarSign, MessageSquare, HelpCircle,
   Calendar, ChevronDown, ChevronUp, Sun, Moon, TrendingUp, Eye, EyeOff
 } from "lucide-react"
 
@@ -96,7 +96,7 @@ export default function PortalCliente() {
   const [showBienvenida, setShowBienvenida] = useState(false)
   const [procesoADescartar, setProcesoADescartar] = useState<Proceso | null>(null)
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({})
-  const [hideSeguimiento, setHideSeguimiento] = useState<Record<string, boolean>>({}) // nuevo: ocultar timeline
+  const [hideSeguimiento, setHideSeguimiento] = useState<Record<string, boolean>>({})
   const [filtroPanel, setFiltroPanel] = useState(false)
   const [fDepto, setFDepto] = useState("")
   const [fEntidad, setFEntidad] = useState("")
@@ -241,13 +241,14 @@ export default function PortalCliente() {
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
-  const solicitudesPorEtapa = [0,1,2,3,4].map(etapa => ({ etapa: ETAPAS[etapa], cantidad: solicitudes.filter(s => (s.etapa_actual ?? 0) === etapa).length }))
-
-  // Tendencia últimos 30 días
+  // Tendencia últimos 30 días (mejorado)
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
-  const procesosFiltrados = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
+  const procesosTendencia = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
-  procesosFiltrados.forEach(p => { const fechaKey = new Date(p.fecha_oferta!).toISOString().split('T')[0]; tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1) })
+  procesosTendencia.forEach(p => {
+    const fechaKey = new Date(p.fecha_oferta!).toISOString().split('T')[0]
+    tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1)
+  })
   const tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
 
   // Procesos por departamento
@@ -279,7 +280,16 @@ export default function PortalCliente() {
   if (loading) return <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
   if (error) return <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center text-red-500">{error}</div>
 
-  const tooltipStyle = { backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '11px', color: '#fff' }
+  // Tooltip con fondo dinámico según tema
+  const tooltipStyle = {
+    backgroundColor: darkMode ? '#1f2937' : '#ffffff',
+    border: darkMode ? 'none' : '1px solid #e5e7eb',
+    borderRadius: '8px',
+    padding: '6px 12px',
+    fontSize: '11px',
+    color: darkMode ? '#fff' : '#1f2937',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-sans antialiased transition-colors duration-300">
@@ -316,15 +326,54 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - GRÁFICOS COMPLETOS */}
+          {/* COLUMNA IZQUIERDA - NUEVO ORDEN: Tendencia, Departamentos, Presupuesto */}
           <div className="lg:col-span-3 space-y-5">
-            {/* Pastel 3 categorías */}
+            {/* Tendencia de procesos (mejorado) */}
+            {tendenciaData.length > 0 && (
+              <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
+                <div className="flex items-center gap-2 mb-4"><TrendingUp size={14} className="text-blue-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tendencia de procesos</h2></div>
+                <div className="h-[200px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={tendenciaData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                      <XAxis dataKey="fecha" tick={{ fontSize: 9, fill: '#6b7280' }} interval="preserveStartEnd" tickFormatter={(v) => v.slice(5)} />
+                      <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} allowDecimals={false} domain={[0, 'dataMax + 1']} />
+                      <Tooltip contentStyle={tooltipStyle} labelFormatter={(l) => `Fecha: ${l}`} />
+                      <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="text-center text-[9px] text-gray-500 mt-2">Últimos 30 días</div>
+              </div>
+            )}
+
+            {/* Procesos por departamento */}
+            {deptoData.length > 0 && (
+              <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
+                <div className="flex items-center gap-2 mb-4"><MapPin size={14} className="text-emerald-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Procesos por departamento</h2></div>
+                <div className="h-[200px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={deptoData} layout="vertical" margin={{ left: 30 }}>
+                      <XAxis type="number" tick={{ fontSize: 9, fill: '#6b7280' }} />
+                      <YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: '#6b7280' }} width={80} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Bar dataKey="value" fill="#10b981" radius={[0,4,4,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Distribución presupuestaria (pastel) */}
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-4"><PieChartIcon size={14} className="text-emerald-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Distribución presupuestaria</h2></div>
-              <div className="h-[180px] w-full">
+              <div className="h-[200px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={[{ name: "Interesados", value: presInteresados, color: "#10b981" }, { name: "En análisis", value: presAnalisis, color: "#f59e0b" }, { name: "Acompañamiento", value: presAcompanamiento, color: "#3b82f6" }]} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2} dataKey="value" stroke="none">
+                    <Pie data={[
+                      { name: "Interesados", value: presInteresados, color: "#10b981" },
+                      { name: "En análisis", value: presAnalisis, color: "#f59e0b" },
+                      { name: "Acompañamiento", value: presAcompanamiento, color: "#3b82f6" }
+                    ]} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2} dataKey="value" stroke="none">
                       <Cell fill="#10b981" /><Cell fill="#f59e0b" /><Cell fill="#3b82f6" />
                     </Pie>
                     <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [fmt(value), 'Presupuesto']} />
@@ -338,51 +387,6 @@ export default function PortalCliente() {
                 <div className="border-t border-gray-200 dark:border-gray-800 pt-2 mt-1"><div className="flex justify-between font-semibold"><span>Total potencial</span><span className="text-emerald-600 dark:text-emerald-400">{fmt(presTotal)}</span></div></div>
               </div>
             </div>
-
-            {/* Tendencia de procesos */}
-            {tendenciaData.length > 0 && (
-              <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-                <div className="flex items-center gap-2 mb-4"><TrendingUp size={14} className="text-blue-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tendencia de procesos</h2></div>
-                <div className="h-[160px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={tendenciaData}><XAxis dataKey="fecha" tick={{ fontSize: 9, fill: '#6b7280' }} interval="preserveStartEnd" tickFormatter={(v) => v.slice(5)} /><YAxis tick={{ fontSize: 9, fill: '#6b7280' }} /><Tooltip contentStyle={tooltipStyle} labelFormatter={(l) => `Fecha: ${l}`} /><Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} /></LineChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="text-center text-[9px] text-gray-500 mt-2">Últimos 30 días</div>
-              </div>
-            )}
-
-            {/* Procesos por departamento */}
-            {deptoData.length > 0 && (
-              <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-                <div className="flex items-center gap-2 mb-4"><MapPin size={14} className="text-emerald-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Procesos por depto.</h2></div>
-                <div className="h-[160px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={deptoData} layout="vertical" margin={{ left: 30 }}><XAxis type="number" tick={{ fontSize: 9, fill: '#6b7280' }} /><YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: '#6b7280' }} width={70} /><Tooltip contentStyle={tooltipStyle} /><Bar dataKey="value" fill="#10b981" radius={[0,4,4,0]} /></BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            )}
-
-            {/* Acompañamiento por etapa */}
-            {solicitudes.length > 0 && (
-              <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-                <div className="flex items-center gap-2 mb-4"><BarChartIcon size={14} className="text-blue-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Acompañamiento por etapa</h2></div>
-                <div className="h-[160px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={solicitudesPorEtapa} layout="vertical" margin={{ left: 40 }}><XAxis type="number" tick={{ fontSize: 9, fill: '#6b7280' }} /><YAxis type="category" dataKey="etapa" tick={{ fontSize: 9, fill: '#6b7280' }} width={70} /><Tooltip contentStyle={tooltipStyle} /><Bar dataKey="cantidad" fill="#3b82f6" radius={[0,4,4,0]} /></BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            )}
-
-            {/* Top entidades por presupuesto */}
-            {topEntidades.length > 0 && (
-              <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-                <div className="flex items-center gap-2 mb-4"><DollarSign size={14} className="text-amber-500"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Top entidades por presupuesto</h2></div>
-                <div className="space-y-2">{topEntidades.map((e, i) => (<div key={i} className="flex justify-between items-center text-xs"><span className="truncate w-32 text-gray-700 dark:text-gray-300">{e.name}</span><span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(e.total)}</span></div>))}</div>
-              </div>
-            )}
           </div>
 
           {/* COLUMNA CENTRAL */}
@@ -405,7 +409,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO con colapso general y toggle de seguimiento */}
+            {/* PESTAÑA ACOMPAÑAMIENTO con toggle de seguimiento */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
@@ -537,10 +541,27 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA - MÉTRICAS */}
+          {/* COLUMNA DERECHA: Top Oportunidades + Top Entidades */}
           <div className="lg:col-span-3 space-y-5">
-            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2><div className="space-y-2">{[...procesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}</div></div>
-            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2><div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{procesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div></div>
+            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
+              <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
+              <div className="space-y-2">
+                {[...procesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}
+              </div>
+            </div>
+
+            {/* Top entidades por presupuesto (movido aquí) */}
+            {topEntidades.length > 0 && (
+              <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
+                <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-amber-500"/>Top entidades por presupuesto</h2>
+                <div className="space-y-2">{topEntidades.map((e, i) => (<div key={i} className="flex justify-between items-center text-xs"><span className="truncate w-32 text-gray-700 dark:text-gray-300">{e.name}</span><span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(e.total)}</span></div>))}</div>
+              </div>
+            )}
+
+            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
+              <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2>
+              <div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{procesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div>
+            </div>
             {cliente?.drive_url && (<a href={cliente.drive_url} target="_blank" rel="noreferrer" className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-4 flex items-center gap-3 hover:shadow-sm transition-all"><FolderOpen size={18} className="text-blue-600" /><div><p className="text-[12px] font-medium text-gray-900 dark:text-white">Google Drive</p><p className="text-[10px] text-gray-500">Mis documentos</p></div></a>)}
           </div>
         </div>
