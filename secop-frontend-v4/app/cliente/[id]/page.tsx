@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase"
 import type { Cliente, Proceso, Comentario, SolicitudAcompanamiento } from "@/types"
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  LineChart, Line, Area, AreaChart, Legend
+  LineChart, Line, Area
 } from "recharts"
 import {
   Bell, Search, LogOut, ExternalLink, Send, FolderOpen, Archive,
@@ -36,7 +36,7 @@ function diasRestantes(f: string | null): number | null {
 
 const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 
-// ---------- TIMELINE CORREGIDA: último círculo con check y barra exacta ----------
+// ---------- TIMELINE (con check en última etapa) ----------
 function Timeline({ etapa }: { etapa: number }) {
   const idx = Math.min(Math.max(0, etapa), 4)
   return (
@@ -44,17 +44,13 @@ function Timeline({ etapa }: { etapa: number }) {
       <div className="absolute h-[2px] bg-gray-200 dark:bg-gray-800 w-full rounded-full"></div>
       <div className="absolute h-[2px] bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full transition-all duration-500" style={{ width: `${(idx / 4) * 100}%` }}></div>
       {ETAPAS.map((e, i) => {
-        const isActive = i < idx        // etapas completamente pasadas (check)
-        const isCurrent = i === idx     // etapa actual
-        const isLast = i === 4          // última etapa (Resultado)
+        const isActive = i < idx
+        const isCurrent = i === idx
+        const isLast = i === 4
         let displayText = ""
-        if (isLast && idx === 4) {
-          displayText = "✓"              // si ya pasó la última, muestra check
-        } else if (isActive) {
-          displayText = "✓"
-        } else {
-          displayText = (i + 1).toString()
-        }
+        if (isLast && idx === 4) displayText = "✓"
+        else if (isActive) displayText = "✓"
+        else displayText = (i + 1).toString()
         return (
           <div key={i} className="relative z-10 flex flex-col items-center" style={{ width: `${100 / 4}%` }}>
             <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all ${(isActive || (isCurrent && idx === 4)) ? "bg-gradient-to-br from-blue-500 to-emerald-500 text-white shadow-md" : "bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-500"} ${isCurrent ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-900" : ""}`}>
@@ -251,7 +247,7 @@ export default function PortalCliente() {
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
-  // Tendencia últimos 30 días con línea de tendencia (line chart)
+  // Tendencia últimos 30 días con línea de tendencia
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
@@ -261,7 +257,7 @@ export default function PortalCliente() {
   })
   let tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
   
-  // Calcular línea de tendencia (regresión lineal simple)
+  // Línea de tendencia (regresión lineal)
   let trendData: { fecha: string; trend: number | null }[] = []
   if (tendenciaData.length >= 2) {
     const n = tendenciaData.length
@@ -352,9 +348,9 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA */}
+          {/* COLUMNA IZQUIERDA - gráficos (sin cambios) */}
           <div className="lg:col-span-3 space-y-5">
-            {/* Tendencia con línea de tendencia */}
+            {/* Tendencia con área y línea de tendencia */}
             {tendenciaData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
                 <div className="flex items-center gap-2 mb-4"><TrendingUp size={14} className="text-blue-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tendencia de procesos</h2></div>
@@ -399,7 +395,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* Distribución presupuestaria - pastel con tooltip legible */}
+            {/* Distribución presupuestaria */}
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-4"><PieChartIcon size={14} className="text-emerald-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Distribución presupuestaria</h2></div>
               <div className="h-[200px] w-full">
@@ -445,7 +441,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO - presupuesto visible junto al estado */}
+            {/* PESTAÑA ACOMPAÑAMIENTO - CORREGIDA: presupuesto destacado a la derecha */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
@@ -460,20 +456,30 @@ export default function PortalCliente() {
                     const isDetailsHidden = hideDetails[sol.id] || false
                     return (
                       <div key={sol.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 transition-all shadow-sm">
-                        <div className="flex justify-between items-start flex-wrap gap-2 mb-3">
-                          <div><div className="font-bold text-gray-900 dark:text-white text-lg">{proceso?.entidad || "Proceso"}</div><div className="text-xs text-blue-600 font-mono">{proceso?.referencia || sol.numero_proceso}</div></div>
-                          <div className="flex items-center gap-2">
-                            <div className={`text-xs px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
-                              {sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}
+                        {/* Cabecera con dos columnas: izquierda (entidad+referencia) y derecha (presupuesto + estado + colapso) */}
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-bold text-gray-900 dark:text-white text-lg">{proceso?.entidad || "Proceso"}</div>
+                            <div className="text-xs text-blue-600 font-mono">{proceso?.referencia || sol.numero_proceso}</div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            {/* Presupuesto grande a la derecha, como en Nuevos */}
+                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso?.presupuesto)}</div>
+                            <div className="flex items-center justify-end gap-2 mt-1">
+                              <div className={`text-xs px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
+                                {sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}
+                              </div>
+                              <button onClick={() => setCollapsedCards(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
+                                {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                              </button>
                             </div>
-                            {/* Presupuesto al lado del estado */}
-                            <span className="text-emerald-600 dark:text-emerald-400 font-mono text-xs font-bold">{fmt(proceso?.presupuesto)}</span>
-                            <button onClick={() => setCollapsedCards(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">{isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</button>
                           </div>
                         </div>
+
                         {!isCollapsed && (
                           <>
-                            <div className="bg-gray-100 dark:bg-gray-800/50 rounded-lg p-3 mb-4">
+                            {/* Detalles del proceso */}
+                            <div className="bg-gray-100 dark:bg-gray-800/50 rounded-lg p-3 my-4">
                               <p className="text-sm text-gray-700 dark:text-gray-300">{proceso?.objeto || sol.observaciones}</p>
                               <div className="flex gap-3 mt-2 text-xs">
                                 {proceso?.departamento && <span><MapPin size={12} className="inline mr-1" />{proceso.departamento}</span>}
@@ -482,6 +488,7 @@ export default function PortalCliente() {
                               {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 block mt-2">Ver SECOP ↗</a>}
                             </div>
 
+                            {/* Gestión y comentarios (ocultable) */}
                             <div className="border-t border-gray-200 dark:border-gray-800 pt-3">
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span>
@@ -528,7 +535,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PROCESOS NUEVOS O INTERESADOS */}
+            {/* PROCESOS NUEVOS O INTERESADOS - sin cambios */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
@@ -566,7 +573,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* DESCARTADOS */}
+            {/* DESCARTADOS - sin cambios */}
             {tab === "descartados" && (
               <div className="space-y-3">
                 {descartados.length === 0 ? (<div className="text-center py-16 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-5xl mb-4">🗑</div><div className="text-[15px] font-semibold text-gray-900 dark:text-white mb-2">Sin procesos descartados</div><div className="text-[13px] text-gray-500">Se eliminan automáticamente después de 30 días.</div></div>) : (
@@ -576,7 +583,7 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA */}
+          {/* COLUMNA DERECHA - sin cambios */}
           <div className="lg:col-span-3 space-y-5">
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
