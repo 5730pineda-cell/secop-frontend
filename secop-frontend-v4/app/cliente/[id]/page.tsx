@@ -36,70 +36,18 @@ function diasRestantes(f: string | null): number | null {
 
 const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 
-// ---------- GRÁFICOS ADICIONALES ----------
-function getTrendData(procesos: Proceso[]) {
-  const hoy = new Date()
-  const ultimos30Dias: { [key: string]: number } = {}
-  for (let i = 29; i >= 0; i--) {
-    const fecha = new Date()
-    fecha.setDate(hoy.getDate() - i)
-    const label = fecha.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
-    ultimos30Dias[label] = 0
-  }
-  procesos.forEach(p => {
-    if (!p.created_at) return
-    const fechaCreacion = new Date(p.created_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
-    if (ultimos30Dias[fechaCreacion] !== undefined) ultimos30Dias[fechaCreacion]++
-  })
-  return Object.entries(ultimos30Dias).map(([name, value]) => ({ name, procesos: value }))
-}
-
-function getTopEntidades(procesos: Proceso[]) {
-  const mapa = new Map<string, number>()
-  procesos.forEach(p => {
-    if (p.entidad) {
-      const total = (mapa.get(p.entidad) || 0) + (p.presupuesto || 0)
-      mapa.set(p.entidad, total)
-    }
-  })
-  return Array.from(mapa.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([nombre, presupuesto]) => ({ nombre: nombre.length > 25 ? nombre.substring(0, 22) + '…' : nombre, presupuesto }))
-}
-
-function getProcesosPorDepto(procesos: Proceso[]) {
-  const mapa = new Map<string, number>()
-  procesos.forEach(p => {
-    if (p.departamento) mapa.set(p.departamento, (mapa.get(p.departamento) || 0) + 1)
-  })
-  return Array.from(mapa.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([depto, cantidad]) => ({ depto, cantidad }))
-}
-
-function getEtapasInteresados(procesos: Proceso[]) {
-  const etapasCount = [0, 0, 0, 0, 0]
-  procesos.filter(p => p.estado === "interesado").forEach(p => {
-    const etapa = p.etapa_seguimiento ?? 0
-    if (etapa >= 0 && etapa < 5) etapasCount[etapa]++
-  })
-  return ETAPAS.map((nombre, idx) => ({ nombre, cantidad: etapasCount[idx] })).filter(e => e.cantidad > 0)
-}
-
-// ---------- COMPONENTES UI ----------
+// ---------- COMPONENTE TIMELINE (corregido) ----------
 function Timeline({ etapa }: { etapa: number }) {
-  const idx = typeof etapa === "number" ? etapa : 0
+  const idx = Math.min(Math.max(0, etapa), 4)
   return (
     <div className="relative flex items-center w-full mt-4">
       <div className="absolute h-[2px] bg-[#2A3441] w-full rounded-full"></div>
-      <div className="absolute h-[2px] bg-gradient-to-r from-[#00B0FF] to-[#00E676] rounded-full transition-all duration-500" style={{ width: `${(idx / (ETAPAS.length - 1)) * 100}%` }}></div>
+      <div className="absolute h-[2px] bg-gradient-to-r from-[#00B0FF] to-[#00E676] rounded-full transition-all duration-500" style={{ width: `${(idx / 4) * 100}%` }}></div>
       {ETAPAS.map((e, i) => {
         const isActive = i <= idx
         const isCurrent = i === idx
         return (
-          <div key={i} className="relative z-10 flex flex-col items-center" style={{ width: `${100 / (ETAPAS.length - 1)}%` }}>
+          <div key={i} className="relative z-10 flex flex-col items-center" style={{ width: `${100 / 4}%` }}>
             <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all ${isActive ? "bg-gradient-to-br from-[#00B0FF] to-[#00E676] text-[#0B132B] shadow-lg" : "bg-[#2A3441] text-[#5A647A]"} ${isCurrent ? "ring-2 ring-[#00B0FF] ring-offset-2 ring-offset-[#0B132B]" : ""}`}>
               {isActive && i < idx ? "✓" : i + 1}
             </div>
@@ -111,6 +59,7 @@ function Timeline({ etapa }: { etapa: number }) {
   )
 }
 
+// ---------- BIENVENIDA ----------
 function BienvenidaToast({ nombre, onClose }: { nombre: string; onClose: () => void }) {
   const [visible, setVisible] = useState(false)
   useEffect(() => {
@@ -176,21 +125,36 @@ export default function PortalCliente() {
     if (ce || !c) { setError("Cliente no encontrado."); setLoading(false); return }
     setCliente(c)
 
-    // Limpieza de procesos vencidos
+    // Limpiar vencidos
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "nuevo").lt("fecha_oferta", new Date().toISOString())
     const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
+    // Obtener solicitudes activas (pendiente o en_proceso) para excluir sus procesos
+    const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("proceso_id, estado").eq("cliente_id", id)
+    setSolicitudes(sol || [])
+    const idsExcluir = (sol || [])
+      .filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso')
+      .map(s => s.proceso_id)
+      .filter(Boolean) as string[]
+
     const hoy = new Date().toISOString()
-    const { data: p } = await supabase.from("procesos").select("*").eq("cliente_id", id).neq("estado", "descartado").or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`).order("fecha_oferta", { ascending: true })
+    let query = supabase
+      .from("procesos")
+      .select("*")
+      .eq("cliente_id", id)
+      .neq("estado", "descartado")
+      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
+      .order("fecha_oferta", { ascending: true })
+
+    if (idsExcluir.length > 0) {
+      query = query.not("id", "in", `(${idsExcluir.join(",")})`)
+    }
+    const { data: p } = await query
     setProcesos(p || [])
 
     const { data: desc } = await supabase.from("procesos").select("*").eq("cliente_id", id).eq("estado", "descartado").order("updated_at", { ascending: false })
     setDescartados(desc || [])
-
-    // Cargar solicitudes de acompañamiento del cliente
-    const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id).order("created_at", { ascending: false })
-    setSolicitudes(sol || [])
 
     setLoading(false)
     const key = `bienvenida_${id}`
@@ -201,6 +165,7 @@ export default function PortalCliente() {
     }
   }
 
+  // Marcar interés (no afecta acompañamiento)
   async function marcarInteres(procesoId: string) {
     if (saving[procesoId]) return
     setSaving(prev => ({ ...prev, [procesoId]: true }))
@@ -211,12 +176,11 @@ export default function PortalCliente() {
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // NUEVA FUNCIÓN: Enviar a SOFIA crea una solicitud de acompañamiento
+  // Enviar a acompañamiento: crea solicitud y recarga para que desaparezca de la lista
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
     const proc = procesos.find(x => x.id === procesoId)
     if (!proc) return
-
     setSaving(prev => ({ ...prev, [procesoId]: "acompanamiento" }))
 
     const { error } = await supabase.from("solicitudes_acompanamiento").insert({
@@ -233,27 +197,28 @@ export default function PortalCliente() {
     if (error) {
       mostrarToast("Error al enviar: " + error.message, "error")
     } else {
-      mostrarToast("Solicitud de acompañamiento enviada. El equipo OC te responderá en la pestaña 'Acompañamiento'.", "ok")
-      // Recargar solicitudes para mostrar la nueva
-      const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id).order("created_at", { ascending: false })
-      setSolicitudes(sol || [])
-      setTab("acompanamiento") // Cambiar a la pestaña de acompañamiento
+      mostrarToast("Solicitud enviada. Ahora está en la pestaña 'Acompañamiento'.", "ok")
+      await cargar() // Recargar todo para que el proceso desaparezca de la lista
+      setTab("acompanamiento")
     }
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
+  // Descartar proceso
   async function descartar(procesoId: string) {
     setProcesoADescartar(null)
     const p = procesos.find(x => x.id === procesoId)
-    setSaliendo(prev => ({ ...prev, [procesoId]: true }))
-    await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
-    await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
-    if (p) setDescartados(prev => [{ ...p, estado: "descartado" }, ...prev])
-    setTimeout(() => {
-      setProcesos(prev => prev.filter(x => x.id !== procesoId))
-      setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n })
-    }, 320)
-    mostrarToast("Proceso descartado.", "info")
+    if (p) {
+      setSaliendo(prev => ({ ...prev, [procesoId]: true }))
+      await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
+      await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
+      setDescartados(prev => [{ ...p, estado: "descartado" }, ...prev])
+      setTimeout(() => {
+        setProcesos(prev => prev.filter(x => x.id !== procesoId))
+        setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n })
+      }, 320)
+      mostrarToast("Proceso descartado.", "info")
+    }
   }
 
   async function restaurar(procesoId: string) {
@@ -275,16 +240,20 @@ export default function PortalCliente() {
     const texto = nuevoComentarioSolicitud[solicitudId]?.trim()
     if (!texto) return
     setEnviandoComentarioSolicitud(prev => ({ ...prev, [solicitudId]: true }))
-    await supabase.from("comentarios").insert({
+    const { error } = await supabase.from("comentarios").insert({
       solicitud_id: solicitudId,
       cliente_id: id,
       autor: "cliente",
       texto
     })
-    await cargarComentariosSolicitud(solicitudId)
-    setNuevoComentarioSolicitud(prev => ({ ...prev, [solicitudId]: "" }))
+    if (!error) {
+      await cargarComentariosSolicitud(solicitudId)
+      setNuevoComentarioSolicitud(prev => ({ ...prev, [solicitudId]: "" }))
+      mostrarToast("Comentario enviado.", "ok")
+    } else {
+      mostrarToast("Error al enviar comentario.", "error")
+    }
     setEnviandoComentarioSolicitud(prev => ({ ...prev, [solicitudId]: false }))
-    mostrarToast("Comentario enviado.", "ok")
   }
 
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
@@ -292,15 +261,11 @@ export default function PortalCliente() {
     setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("")
   }
 
+  // Datos para gráficos (resumidos)
   const nuevos = procesos.filter(p => p.estado === "nuevo")
   const interesados = procesos.filter(p => p.estado === "interesado")
   const presTotal = procesos.reduce((s, p) => s + Number(p.presupuesto || 0), 0)
   const presInteresados = interesados.reduce((s, p) => s + Number(p.presupuesto || 0), 0)
-
-  const trendData = getTrendData(procesos)
-  const topEntidades = getTopEntidades(procesos)
-  const procesosPorDepto = getProcesosPorDepto(procesos)
-  const etapasInteresados = getEtapasInteresados(procesos)
 
   const deptos = [...new Set(procesos.map(p => p.departamento).filter(Boolean))].sort() as string[]
   const entidades = [...new Set(procesos.map(p => p.entidad).filter(Boolean))].sort() as string[]
@@ -320,8 +285,8 @@ export default function PortalCliente() {
 
   const filtrosActivos = [fDepto, fEntidad, fModalidad, fPresMin, fPresMax, fTexto, searchTerm].filter(Boolean).length
 
-  if (loading) return ( <div className="min-h-screen bg-[#0B132B] flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00B0FF]"></div></div> )
-  if (error) return ( <div className="min-h-screen bg-[#0B132B] flex items-center justify-center text-red-500">{error}</div> )
+  if (loading) return <div className="min-h-screen bg-[#0B132B] flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00B0FF]"></div></div>
+  if (error) return <div className="min-h-screen bg-[#0B132B] flex items-center justify-center text-red-500">{error}</div>
 
   const tooltipStyle = {
     backgroundColor: '#1C2538',
@@ -381,49 +346,17 @@ export default function PortalCliente() {
         </div>
       </header>
 
-      {/* MAIN CONTENT */}
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - GRÁFICOS */}
+          {/* COLUMNA IZQUIERDA - GRÁFICOS (simplificados) */}
           <div className="lg:col-span-3 space-y-6">
-            <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
-              <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2"><TrendingUp size={16} className="text-[#00B0FF]" /><h2 className="text-[13px] font-bold text-white uppercase tracking-wider">Tendencia de Procesos</h2></div><span className="text-[10px] text-[#5A647A] font-mono">Últimos 30 días</span></div>
-              <div className="h-[180px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trendData}>
-                    <defs><linearGradient id="colorProcesos" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00B0FF" stopOpacity={0.3}/><stop offset="95%" stopColor="#00B0FF" stopOpacity={0}/></linearGradient></defs>
-                    <XAxis dataKey="name" stroke="#2A3441" fontSize={9} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#2A3441" fontSize={9} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={tooltipStyle} itemStyle={{ color: '#00B0FF' }} labelStyle={{ color: '#FFFFFF', fontWeight: 'bold' }} />
-                    <Area type="monotone" dataKey="procesos" stroke="#00B0FF" strokeWidth={2} fill="url(#colorProcesos)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {procesosPorDepto.length > 0 && (
-              <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
-                <div className="flex items-center gap-2 mb-4"><BarChartIcon size={16} className="text-[#00E676]" /><h2 className="text-[13px] font-bold text-white uppercase tracking-wider">Procesos por Depto.</h2></div>
-                <div className="h-[160px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={procesosPorDepto} layout="vertical" margin={{ left: 40 }}>
-                      <XAxis type="number" stroke="#5A647A" fontSize={10} />
-                      <YAxis type="category" dataKey="depto" stroke="#5A647A" fontSize={9} width={80} tick={{ fill: '#A0A8B8' }} />
-                      <Tooltip contentStyle={tooltipStyle} itemStyle={{ color: '#FFFFFF' }} labelStyle={{ color: '#FFFFFF' }} formatter={(value) => [`${value} procesos`, 'Cantidad']} />
-                      <Bar dataKey="cantidad" fill="#00B0FF" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            )}
-
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <div className="flex items-center gap-2 mb-4"><PieChartIcon size={16} className="text-[#00E676]" /><h2 className="text-[13px] font-bold text-white uppercase tracking-wider">Distribución presupuestaria</h2></div>
               <div className="h-[180px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie data={[{ name: "Interesados", value: presInteresados, color: "#00E676" }, { name: "En análisis", value: presTotal - presInteresados, color: "#FFB74D" }]} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value" stroke="none"><Cell fill="#00E676" /><Cell fill="#FFB74D" /></Pie>
-                    <Tooltip contentStyle={tooltipStyle} itemStyle={{ color: '#FFFFFF', fontSize: '11px' }} labelStyle={{ color: '#FFFFFF', fontWeight: 'bold' }} formatter={(value: number) => [fmt(value), 'Presupuesto']} />
+                    <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [fmt(value), 'Presupuesto']} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -470,12 +403,14 @@ export default function PortalCliente() {
                   <div className="text-center py-16 bg-[#0F1622] rounded-xl border border-[#1C2538]">
                     <div className="text-5xl mb-4">📋</div>
                     <div className="text-[15px] font-semibold text-white mb-2">No tienes solicitudes de acompañamiento</div>
-                    <div className="text-[13px] text-[#5A647A]">Usa el botón "Enviar a SOFIA (Acompañamiento)" en cualquier proceso para solicitar acompañamiento jurídico.</div>
+                    <div className="text-[13px] text-[#5A647A]">Usa el botón "Enviar a SOFIA (Acompañamiento)" en cualquier proceso.</div>
                   </div>
                 ) : (
                   solicitudes.map(sol => {
-                    const proceso = procesos.find(p => p.id === sol.proceso_id)
+                    const proceso = procesos.find(p => p.id === sol.proceso_id) || descartados.find(p => p.id === sol.proceso_id)
                     if (!comentariosSolicitud[sol.id]) cargarComentariosSolicitud(sol.id)
+                    const etapaActual = sol.etapa_actual ?? 0
+                    const nombreEtapa = sol.etapa_nombre || ETAPAS[etapaActual]
                     return (
                       <div key={sol.id} className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
                         {/* Cabecera */}
@@ -489,7 +424,7 @@ export default function PortalCliente() {
                           </div>
                         </div>
 
-                        {/* Detalles del proceso */}
+                        {/* Detalles */}
                         <div className="bg-[#1C2538] rounded-lg p-3 mb-4">
                           <p className="text-sm text-[#A0A8B8]">{proceso?.objeto || sol.observaciones}</p>
                           <div className="flex gap-3 mt-2 text-xs">
@@ -500,19 +435,24 @@ export default function PortalCliente() {
                           {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-[#60a5fa] block mt-2">Ver SECOP ↗</a>}
                         </div>
 
-                        {/* Seguimiento de etapas (nombre personalizado o estándar) */}
+                        {/* Seguimiento de etapas */}
                         <div className="border-t border-[#1C2538] pt-3 mb-3">
                           <div className="flex justify-between items-center mb-2">
                             <span className="text-[11px] font-bold text-[#00B0FF] uppercase tracking-wider">Seguimiento de gestión</span>
-                            <span className="text-[10px] text-[#00E676]">{sol.etapa_nombre || ETAPAS[sol.etapa_actual || 0]}</span>
+                            <span className="text-[10px] text-[#00E676]">{nombreEtapa}</span>
                           </div>
-                          <Timeline etapa={sol.etapa_actual || 0} />
+                          <Timeline etapa={etapaActual} />
+                          {sol[`fecha_etapa_${etapaActual}`] && (
+                            <div className="mt-2 text-[11px] text-[#5A647A] flex items-center gap-2">
+                              <Calendar size={12} /> Fecha registrada: {new Date(sol[`fecha_etapa_${etapaActual}`]).toLocaleString()}
+                            </div>
+                          )}
                           <div className="mt-2 text-[11px] text-[#5A647A]">
-                            {sol.etapa_actual === 0 ? "El equipo OC iniciará el análisis pronto." : `Estamos en la etapa ${sol.etapa_nombre || ETAPAS[sol.etapa_actual || 0]}.`}
+                            {etapaActual === 0 ? "El equipo OC iniciará el análisis pronto." : `Estamos en la etapa ${nombreEtapa}.`}
                           </div>
                         </div>
 
-                        {/* Comentarios (chat) */}
+                        {/* Comentarios */}
                         <div className="border-t border-[#1C2538] pt-3">
                           <span className="text-[11px] font-bold text-[#00B0FF] flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
                           <div className="space-y-2 max-h-40 overflow-y-auto mb-2">
@@ -544,11 +484,11 @@ export default function PortalCliente() {
                 {listaActual.length === 0 ? (
                   <div className="text-center py-16 bg-[#0F1622] rounded-xl border border-[#1C2538]">
                     <div className="text-5xl mb-4">{tab === "interesado" ? "⭐" : "📋"}</div>
-                    <div className="text-[15px] font-semibold text-white mb-2">{filtrosActivos > 0 ? "Sin resultados" : tab === "interesado" ? "Sin procesos de interés aún" : "No hay procesos nuevos"}</div>
-                    <div className="text-[13px] text-[#5A647A]">{filtrosActivos > 0 ? "Ajusta los filtros para ver más resultados." : tab === "interesado" ? "Marca procesos desde la pestaña Nuevos." : "SOFIA monitorea procesos diariamente."}</div>
+                    <div className="text-[15px] font-semibold text-white mb-2">No hay procesos para mostrar</div>
+                    <div className="text-[13px] text-[#5A647A]">Los procesos enviados a acompañamiento están en su propia pestaña.</div>
                   </div>
                 ) : (
-                  listaActual.map((p) => {
+                  listaActual.map(p => {
                     const dias = diasRestantes(p.fecha_oferta)
                     const urgente = dias !== null && dias <= 3 && dias >= 0
                     const isInt = p.estado === "interesado"
@@ -583,7 +523,6 @@ export default function PortalCliente() {
                                 {isSaving && isSaving !== "acompanamiento" ? "..." : "✓ Me interesa"}
                               </button>
                             )}
-                            {/* Botón de acompañamiento (siempre visible) */}
                             <button className="btn flex items-center gap-2 bg-gradient-to-r from-[#00B0FF] to-[#0091EA] hover:from-[#0091EA] hover:to-[#0077B6] text-white text-[12px] font-bold px-4 py-2 rounded-lg transition-all shadow-md" onClick={() => enviarAcompanamiento(p.id)} disabled={isSaving === "acompanamiento"}>
                               <HelpCircle size={14} /> {isSaving === "acompanamiento" ? "Enviando..." : "Enviar a SOFIA (Acompañamiento)"}
                             </button>
@@ -642,14 +581,6 @@ export default function PortalCliente() {
                 })}
               </div>
             </div>
-
-            {topEntidades.length > 0 && (
-              <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
-                <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2"><BarChartIcon size={14} className="text-[#00E676]" />Top Entidades por Presupuesto</h2>
-                <div className="space-y-2">{topEntidades.map((ent, idx) => (<div key={idx} className="flex items-center justify-between text-[11px]"><span className="text-[#A0A8B8] truncate max-w-[120px]">{ent.nombre}</span><span className="text-[#00E676] font-mono">{fmt(ent.presupuesto)}</span></div>))}</div>
-              </div>
-            )}
-
             <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
               <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={14} className="text-[#00B0FF]" />Actividad Reciente</h2>
               <div className="space-y-3">
@@ -657,33 +588,17 @@ export default function PortalCliente() {
                 <div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-[#1C2538] flex items-center justify-center flex-shrink-0"><Send size={12} className="text-[#00E676]" /></div><div><p className="text-[12px] text-white">Análisis IA completado</p><p className="text-[11px] text-[#5A647A]">{procesos.length} procesos evaluados</p><span className="text-[9px] text-[#2A3441] font-mono">hace 1h</span></div></div>
               </div>
             </div>
-
-            {etapasInteresados.length > 0 && (
-              <div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-5">
-                <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3">Etapas de Interés</h2>
-                <div className="space-y-2">{etapasInteresados.map(e => (<div key={e.nombre} className="flex items-center justify-between text-[11px]"><span className="text-[#A0A8B8]">{e.nombre}</span><span className="text-[#00B0FF] font-mono">{e.cantidad} proceso{e.cantidad !== 1 ? 's' : ''}</span></div>))}</div>
-              </div>
+            {cliente?.drive_url && (
+              <a href={cliente.drive_url} target="_blank" rel="noreferrer" className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-4 flex items-center gap-3 hover:border-[#00B0FF40] transition-all">
+                <FolderOpen size={20} className="text-[#00B0FF]" /><div><p className="text-[12px] font-medium text-white">Google Drive</p><p className="text-[10px] text-[#5A647A]">Mis documentos</p></div>
+              </a>
             )}
-
-            <div className="bg-gradient-to-br from-[#0F1622] to-[#0B132B] rounded-xl border border-[#1C2538] p-5">
-              <h2 className="text-[13px] font-bold text-white uppercase tracking-wider mb-3">Mis Herramientas</h2>
-              <div className="grid grid-cols-3 gap-2">
-                <button onClick={() => mostrarToast("Búsqueda guardada localmente", "ok")} className="flex flex-col items-center gap-1 p-2 rounded-lg bg-[#1C2538] hover:bg-[#2A3441] transition-all group"><Save size={16} className="text-[#00B0FF] group-hover:scale-110 transition-transform" /><span className="text-[9px] text-[#A0A8B8]">Guardar Búsqueda</span></button>
-                <button onClick={() => { const próximos = procesos.filter(p => diasRestantes(p.fecha_oferta) !== null && diasRestantes(p.fecha_oferta)! <= 5).length; mostrarToast(`${próximos} procesos cierran en menos de 5 días`, "info") }} className="flex flex-col items-center gap-1 p-2 rounded-lg bg-[#1C2538] hover:bg-[#2A3441] transition-all group"><AlertTriangle size={16} className="text-[#FF5252] group-hover:scale-110 transition-transform" /><span className="text-[9px] text-[#A0A8B8]">Alertas</span></button>
-                <button onClick={() => mostrarToast("Reporte de compatibilidad exportado (CSV)", "ok")} className="flex flex-col items-center gap-1 p-2 rounded-lg bg-[#1C2538] hover:bg-[#2A3441] transition-all group"><FileText size={16} className="text-[#00E676] group-hover:scale-110 transition-transform" /><span className="text-[9px] text-[#A0A8B8]">Reporte IA</span></button>
-              </div>
-            </div>
-
-            {cliente?.drive_url && (<a href={cliente.drive_url} target="_blank" rel="noreferrer" className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-4 flex items-center gap-3 hover:border-[#00B0FF40] transition-all"><FolderOpen size={20} className="text-[#00B0FF]" /><div><p className="text-[12px] font-medium text-white">Google Drive</p><p className="text-[10px] text-[#5A647A]">Mis documentos</p></div></a>)}
           </div>
         </div>
         <div className="mt-8 pt-4 border-t border-[#1C2538] text-center"><p className="text-[10px] text-[#2A3441] font-mono">SOFIA by OC CONSULTORES - Monitoreo inteligente de licitaciones SECOP II</p></div>
       </main>
 
-      {/* TOAST */}
       {toast && (<div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[999] animate-[toastIn_0.25s_ease]" style={{ background: toast.tipo === "ok" ? "#00E676" : "#2A3441", color: "#fff", padding: "12px 24px", borderRadius: "12px", fontSize: "13px", fontWeight: 500, whiteSpace: "nowrap", boxShadow: "0 8px 32px rgba(0,0,0,0.3)" }}>{toast.msg}</div>)}
-
-      {/* MODAL DESCARTAR */}
       {procesoADescartar && (<div className="fixed inset-0 bg-[#0B132B]/80 z-[200] flex items-center justify-center p-5 backdrop-blur-sm" onClick={() => setProcesoADescartar(null)}><div className="bg-[#0F1622] rounded-xl border border-[#1C2538] p-6 max-w-md w-full" onClick={e => e.stopPropagation()}><div className="text-center mb-4"><div className="w-14 h-14 rounded-full bg-[#FF525220] border border-[#FF525240] flex items-center justify-center mx-auto mb-4 text-2xl">⚠</div><h3 className="text-lg font-bold text-white mb-2">¿Descartar proceso?</h3><p className="text-[13px] text-[#A0A8B8]">Pasará a tu carpeta de Descartados y podrás recuperarlo cuando quieras.</p><div className="mt-4 p-3 bg-[#1C2538] rounded-lg"><div className="text-[13px] font-medium text-white">{procesoADescartar.entidad || "—"}</div><div className="text-[11px] text-[#5A647A] font-mono">{procesoADescartar.referencia}</div></div></div><div className="flex gap-3"><button onClick={() => setProcesoADescartar(null)} className="flex-1 py-2.5 rounded-lg bg-[#1C2538] text-[#A0A8B8] text-[13px] font-medium hover:bg-[#2A3441] transition-all">Cancelar</button><button onClick={() => descartar(procesoADescartar.id)} className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-[#FF5252] to-[#DC2626] text-white text-[13px] font-bold hover:opacity-90 transition-all">Sí, descartar</button></div></div></div>)}
 
       {showBienvenida && <BienvenidaToast nombre={cliente?.nombre || ""} onClose={() => setShowBienvenida(false)} />}
