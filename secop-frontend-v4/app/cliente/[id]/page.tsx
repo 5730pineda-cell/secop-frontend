@@ -4,13 +4,14 @@ import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import type { Cliente, Proceso, Comentario, SolicitudAcompanamiento } from "@/types"
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  AreaChart, Area, Legend
 } from "recharts"
 import {
   Bell, Search, LogOut, ExternalLink, Send, FolderOpen, Archive,
   Clock, PieChart as PieChartIcon, Zap, CheckCircle, MapPin, Briefcase,
   Filter, DollarSign, MessageSquare, HelpCircle,
-  Calendar, ChevronDown, ChevronUp, Sun, Moon, TrendingUp, Eye, EyeOff
+  Calendar, ChevronDown, ChevronUp, Sun, Moon, TrendingUp, Eye, EyeOff, TrendingDown
 } from "lucide-react"
 
 // ---------- HELPERS ----------
@@ -35,7 +36,7 @@ function diasRestantes(f: string | null): number | null {
 
 const ETAPAS = ["Análisis", "Aprobación", "Organización", "Presentación", "Resultado"]
 
-// ---------- TIMELINE (corregida: se detiene en Resultado, no se pasa) ----------
+// ---------- TIMELINE (corregida: se detiene en Resultado) ----------
 function Timeline({ etapa }: { etapa: number }) {
   const idx = Math.min(Math.max(0, etapa), 4)
   return (
@@ -96,7 +97,7 @@ export default function PortalCliente() {
   const [showBienvenida, setShowBienvenida] = useState(false)
   const [procesoADescartar, setProcesoADescartar] = useState<Proceso | null>(null)
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({})
-  const [hideSeguimiento, setHideSeguimiento] = useState<Record<string, boolean>>({})
+  const [hideDetails, setHideDetails] = useState<Record<string, boolean>>({}) // oculta timeline + comentarios
   const [filtroPanel, setFiltroPanel] = useState(false)
   const [fDepto, setFDepto] = useState("")
   const [fEntidad, setFEntidad] = useState("")
@@ -241,7 +242,7 @@ export default function PortalCliente() {
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
-  // Tendencia últimos 30 días (mejorado)
+  // Tendencia últimos 30 días (AreaChart más atractivo)
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = procesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
@@ -250,6 +251,14 @@ export default function PortalCliente() {
     tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1)
   })
   const tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
+  // Indicador de tendencia (últimos 7 días vs anteriores)
+  let tendenciaIndicator = null
+  if (tendenciaData.length >= 14) {
+    const last7 = tendenciaData.slice(-7).reduce((s,d)=> s + d.count, 0)
+    const prev7 = tendenciaData.slice(-14, -7).reduce((s,d)=> s + d.count, 0)
+    if (last7 > prev7) tendenciaIndicator = { direction: 'up', percent: Math.round(((last7 - prev7) / prev7)*100) }
+    else if (last7 < prev7) tendenciaIndicator = { direction: 'down', percent: Math.round(((prev7 - last7) / prev7)*100) }
+  }
 
   // Procesos por departamento
   const deptoMap = new Map<string, number>()
@@ -280,7 +289,7 @@ export default function PortalCliente() {
   if (loading) return <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
   if (error) return <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center text-red-500">{error}</div>
 
-  // Tooltip con fondo dinámico según tema
+  // Tooltip dinámico según tema
   const tooltipStyle = {
     backgroundColor: darkMode ? '#1f2937' : '#ffffff',
     border: darkMode ? 'none' : '1px solid #e5e7eb',
@@ -326,20 +335,34 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - NUEVO ORDEN: Tendencia, Departamentos, Presupuesto */}
+          {/* COLUMNA IZQUIERDA - Tendencia (AreaChart), Depto, Presupuesto */}
           <div className="lg:col-span-3 space-y-5">
-            {/* Tendencia de procesos (mejorado) */}
+            {/* Tendencia de procesos - AreaChart con gradiente */}
             {tendenciaData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-                <div className="flex items-center gap-2 mb-4"><TrendingUp size={14} className="text-blue-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tendencia de procesos</h2></div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2"><TrendingUp size={14} className="text-blue-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Tendencia de procesos</h2></div>
+                  {tendenciaIndicator && (
+                    <div className={`text-[10px] flex items-center gap-1 ${tendenciaIndicator.direction === 'up' ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {tendenciaIndicator.direction === 'up' ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                      {tendenciaIndicator.percent}% {tendenciaIndicator.direction === 'up' ? '↑' : '↓'}
+                    </div>
+                  )}
+                </div>
                 <div className="h-[200px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={tendenciaData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                    <AreaChart data={tendenciaData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
                       <XAxis dataKey="fecha" tick={{ fontSize: 9, fill: '#6b7280' }} interval="preserveStartEnd" tickFormatter={(v) => v.slice(5)} />
                       <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} allowDecimals={false} domain={[0, 'dataMax + 1']} />
                       <Tooltip contentStyle={tooltipStyle} labelFormatter={(l) => `Fecha: ${l}`} />
-                      <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} />
-                    </LineChart>
+                      <Area type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} fill="url(#colorCount)" />
+                    </AreaChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="text-center text-[9px] text-gray-500 mt-2">Últimos 30 días</div>
@@ -363,7 +386,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* Distribución presupuestaria (pastel) */}
+            {/* Distribución presupuestaria (pastel con tooltip legible) */}
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-4"><PieChartIcon size={14} className="text-emerald-600"/><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Distribución presupuestaria</h2></div>
               <div className="h-[200px] w-full">
@@ -409,7 +432,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO con toggle de seguimiento */}
+            {/* PESTAÑA ACOMPAÑAMIENTO con presupuesto visible y ocultar timeline+comentarios */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
@@ -421,7 +444,7 @@ export default function PortalCliente() {
                     const etapaActual = sol.etapa_actual ?? 0
                     const nombreEtapa = sol.etapa_nombre || ETAPAS[etapaActual]
                     const isCollapsed = collapsedCards[sol.id] || false
-                    const isSeguimientoHidden = hideSeguimiento[sol.id] || false
+                    const isDetailsHidden = hideDetails[sol.id] || false
                     return (
                       <div key={sol.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 transition-all shadow-sm">
                         <div className="flex justify-between items-start flex-wrap gap-2 mb-3">
@@ -430,6 +453,8 @@ export default function PortalCliente() {
                             <div className={`text-xs px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
                               {sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}
                             </div>
+                            {/* Presupuesto al lado del estado */}
+                            <span className="text-emerald-600 dark:text-emerald-400 font-mono text-xs font-bold">{fmt(proceso?.presupuesto)}</span>
                             <button onClick={() => setCollapsedCards(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">{isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</button>
                           </div>
                         </div>
@@ -440,21 +465,20 @@ export default function PortalCliente() {
                               <div className="flex gap-3 mt-2 text-xs">
                                 {proceso?.departamento && <span><MapPin size={12} className="inline mr-1" />{proceso.departamento}</span>}
                                 {proceso?.modalidad && <span><Briefcase size={12} className="inline mr-1" />{proceso.modalidad}</span>}
-                                <span className="text-emerald-600">{fmt(proceso?.presupuesto)}</span>
                               </div>
                               {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 block mt-2">Ver SECOP ↗</a>}
                             </div>
 
-                            {/* Sección de seguimiento con toggle */}
-                            <div className="border-t border-gray-200 dark:border-gray-800 pt-3 mb-3">
+                            {/* Sección de seguimiento + comentarios que se ocultan juntos */}
+                            <div className="border-t border-gray-200 dark:border-gray-800 pt-3">
                               <div className="flex justify-between items-center mb-2">
-                                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Seguimiento de gestión</span>
-                                <button onClick={() => setHideSeguimiento(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">
-                                  {isSeguimientoHidden ? <Eye size={12} /> : <EyeOff size={12} />}
-                                  {isSeguimientoHidden ? "Mostrar" : "Ocultar"}
+                                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span>
+                                <button onClick={() => setHideDetails(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">
+                                  {isDetailsHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+                                  {isDetailsHidden ? "Mostrar" : "Ocultar"}
                                 </button>
                               </div>
-                              {!isSeguimientoHidden && (
+                              {!isDetailsHidden && (
                                 <>
                                   <Timeline etapa={etapaActual} />
                                   {sol[`fecha_etapa_${etapaActual}`] && (
@@ -465,24 +489,23 @@ export default function PortalCliente() {
                                   <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500">
                                     {etapaActual === 0 ? "El equipo OC iniciará el análisis pronto." : `Estamos en la etapa ${nombreEtapa}.`}
                                   </div>
+                                  <div className="mt-4">
+                                    <span className="text-[11px] font-bold text-blue-600 flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
+                                    <div className="space-y-2 max-h-32 overflow-y-auto mb-2">
+                                      {(comentariosSolicitud[sol.id] || []).map(c => (
+                                        <div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                                          <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-500 mb-1"><span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Tú'}</span><span>{new Date(c.created_at).toLocaleString()}</span></div>
+                                          <p className="text-gray-800 dark:text-gray-200">{c.texto}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentarioSolicitud[sol.id] || ""} onChange={e => setNuevoComentarioSolicitud(prev => ({ ...prev, [sol.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentarioSolicitud(sol.id) } }} />
+                                      <button onClick={() => enviarComentarioSolicitud(sol.id)} disabled={enviandoComentarioSolicitud[sol.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button>
+                                    </div>
+                                  </div>
                                 </>
                               )}
-                            </div>
-
-                            <div className="border-t border-gray-200 dark:border-gray-800 pt-3">
-                              <span className="text-[11px] font-bold text-blue-600 flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
-                              <div className="space-y-2 max-h-40 overflow-y-auto mb-2">
-                                {(comentariosSolicitud[sol.id] || []).map(c => (
-                                  <div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                                    <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-500 mb-1"><span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Tú'}</span><span>{new Date(c.created_at).toLocaleString()}</span></div>
-                                    <p className="text-gray-800 dark:text-gray-200">{c.texto}</p>
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="flex gap-2">
-                                <textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentarioSolicitud[sol.id] || ""} onChange={e => setNuevoComentarioSolicitud(prev => ({ ...prev, [sol.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentarioSolicitud(sol.id) } }} />
-                                <button onClick={() => enviarComentarioSolicitud(sol.id)} disabled={enviandoComentarioSolicitud[sol.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button>
-                              </div>
                             </div>
                           </>
                         )}
@@ -493,7 +516,7 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PROCESOS NUEVOS O INTERESADOS con fecha exacta */}
+            {/* PROCESOS NUEVOS O INTERESADOS */}
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
@@ -541,7 +564,7 @@ export default function PortalCliente() {
             )}
           </div>
 
-          {/* COLUMNA DERECHA: Top Oportunidades + Top Entidades */}
+          {/* COLUMNA DERECHA */}
           <div className="lg:col-span-3 space-y-5">
             <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
               <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
@@ -550,7 +573,6 @@ export default function PortalCliente() {
               </div>
             </div>
 
-            {/* Top entidades por presupuesto (movido aquí) */}
             {topEntidades.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
                 <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-amber-500"/>Top entidades por presupuesto</h2>
