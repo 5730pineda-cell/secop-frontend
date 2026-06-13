@@ -48,7 +48,7 @@ function initials(nombre: string) {
   return nombre.split(" ").map(w => w[0]).join("").substring(0,2).toUpperCase()
 }
 
-// ---------- COMPONENTES AUXILIARES ----------
+// ---------- COMPONENTES UI ----------
 function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
@@ -89,10 +89,8 @@ function TimelineAdmin({ procesoId, etapa, onUpdate }: { procesoId: string; etap
   )
 }
 
-// ---------- MODALES (Placeholders - reemplaza con los tuyos) ----------
+// ---------- MODALES (Simplificados pero funcionales) ----------
 function ModalNuevoCliente({ onClose, onCreated, prefillData }: { onClose: () => void; onCreated: (c: Cliente) => void; prefillData?: Partial<Cliente> }) {
-  // Este es un placeholder. Reemplázalo con tu modal real que ya funciona.
-  // Por ahora crea un cliente simple para que no falle el build.
   const [form, setForm] = useState({
     id: prefillData?.id || "", nombre: prefillData?.nombre || "", usuario: prefillData?.usuario || "", password_hash: "",
     descripcion_negocio: prefillData?.descripcion_negocio || "", palabras_clave: "", palabras_excluidas: "",
@@ -103,6 +101,12 @@ function ModalNuevoCliente({ onClose, onCreated, prefillData }: { onClose: () =>
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState("")
+  function toggleDepto(d: string) {
+    setForm(f => ({ ...f, departamentos: f.departamentos.includes(d) ? f.departamentos.filter(x => x !== d) : [...f.departamentos, d] }))
+  }
+  function toggleTodosDeptos() {
+    setForm(f => ({ ...f, departamentos: f.departamentos.length === DEPARTAMENTOS_CO.length ? [] : [...DEPARTAMENTOS_CO] }))
+  }
   async function guardar() {
     if (!form.id.trim() || !form.nombre.trim()) { setErr("ID y Nombre son obligatorios."); return }
     setSaving(true); setErr("")
@@ -145,10 +149,10 @@ function ModalNuevoCliente({ onClose, onCreated, prefillData }: { onClose: () =>
           <div><label className="text-[11px] text-[#525a68] block mb-1">EMAIL NOTIFICACIONES</label><input type="email" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.email_destinatario} onChange={e => setForm(f=>({...f,email_destinatario:e.target.value}))} /></div>
           <div className="col-span-2"><label className="text-[11px] text-[#525a68] block mb-1">GOOGLE DRIVE URL</label><input className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" value={form.drive_url} onChange={e => setForm(f=>({...f,drive_url:e.target.value}))} /></div>
           <div className="col-span-2">
-            <div className="flex justify-between items-center mb-1"><label className="text-[11px] text-[#525a68]">DEPARTAMENTOS A MONITOREAR</label><button type="button" onClick={() => setForm(f => ({ ...f, departamentos: f.departamentos.length === DEPARTAMENTOS_CO.length ? [] : [...DEPARTAMENTOS_CO] }))} className="text-[10px] text-[#3b82f6] hover:underline">Seleccionar todos</button></div>
-            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-[#252932] rounded bg-[#1c2028]">{DEPARTAMENTOS_CO.map(d => (<button key={d} type="button" onClick={() => setForm(f => ({ ...f, departamentos: f.departamentos.includes(d) ? f.departamentos.filter(x=>x!==d) : [...f.departamentos, d] }))} className={`text-xs px-2 py-1 rounded-full border ${form.departamentos.includes(d) ? "border-[#3b82f6] bg-[#1e3a8a22] text-[#60a5fa]" : "border-[#252932] text-[#525a68]"}`}>{d}</button>))}</div>
+            <div className="flex justify-between items-center mb-1"><label className="text-[11px] text-[#525a68]">DEPARTAMENTOS A MONITOREAR</label><button type="button" onClick={toggleTodosDeptos} className="text-[10px] text-[#3b82f6] hover:underline">Seleccionar todos</button></div>
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-[#252932] rounded bg-[#1c2028]">{DEPARTAMENTOS_CO.map(d => (<button key={d} type="button" onClick={() => toggleDepto(d)} className={`text-xs px-2 py-1 rounded-full border ${form.departamentos.includes(d) ? "border-[#3b82f6] bg-[#1e3a8a22] text-[#60a5fa]" : "border-[#252932] text-[#525a68]"}`}>{d}</button>))}</div>
           </div>
-          <div className="col-span-2"><label className="text-[11px] text-[#525a68] block mb-1">CÓDIGOS UNSPC (coma)</label><input type="text" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" placeholder="Ej: 8016, 8111, 7210" value={form.codigos_unspc_str} onChange={e => setForm(f => ({ ...f, codigos_unspc_str: e.target.value }))} /><p className="text-[10px] text-[#525a68] mt-1">Códigos que la IA usará para filtrar.</p></div>
+          <div className="col-span-2"><label className="text-[11px] text-[#525a68] block mb-1">CÓDIGOS UNSPC (separados por coma)</label><input type="text" className="w-full p-2 bg-[#1c2028] border border-[#252932] rounded text-white text-sm" placeholder="Ej: 8016, 8111, 7210" value={form.codigos_unspc_str} onChange={e => setForm(f => ({ ...f, codigos_unspc_str: e.target.value }))} /><p className="text-[10px] text-[#525a68] mt-1">Códigos que la IA usará para filtrar procesos relevantes.</p></div>
           <div className="col-span-2"><label className="flex items-center gap-2"><input type="checkbox" checked={form.restringir_minima} onChange={e => setForm(f => ({ ...f, restringir_minima: e.target.checked }))} className="w-4 h-4 accent-[#3b82f6]" /><span className="text-[11px] text-[#525a68]">Restringir solo a procesos de Mínima Cuantía</span></label></div>
           <div className="flex gap-4"><label className="flex items-center gap-2"><input type="checkbox" checked={form.usar_ia} onChange={e=>setForm(f=>({...f,usar_ia:e.target.checked}))} /><span className="text-xs">Usar IA</span></label><label className="flex items-center gap-2"><input type="checkbox" checked={form.activo} onChange={e=>setForm(f=>({...f,activo:e.target.checked}))} /><span className="text-xs">Activo al crear</span></label></div>
         </div>
@@ -159,16 +163,14 @@ function ModalNuevoCliente({ onClose, onCreated, prefillData }: { onClose: () =>
   )
 }
 
-// Placeholder para editar cliente (reemplaza con tu modal real)
+// Placeholder para editar cliente (reemplazar con tu modal real)
 function ModalEditarCliente({ cliente, onClose, onUpdated }: { cliente: Cliente; onClose: () => void; onUpdated: (c: Cliente) => void }) {
-  // Implementación mínima para evitar error. Reemplázala con tu modal completo.
-  return null;
+  return null
 }
 
-// Placeholder para proceso manual (reemplaza con tu modal real)
+// Placeholder para proceso manual (reemplazar con tu modal real)
 function ModalProcesoManual({ clientes, onClose, onCreated }: { clientes: Cliente[]; onClose: () => void; onCreated: (p: Proceso) => void }) {
-  // Implementación mínima para evitar error. Reemplázala con tu modal completo.
-  return null;
+  return null
 }
 
 function ModalEliminar({ nombre, onClose, onConfirm, loading }: { nombre: string; onClose: () => void; onConfirm: () => void; loading: boolean }) {
@@ -233,6 +235,7 @@ export default function AdminPage() {
 
   async function cargar() {
     setLoading(true)
+    // Obtener IDs de procesos con solicitud activa (pendiente o en_proceso)
     const { data: solicitudesActivas } = await supabase
       .from("solicitudes_acompanamiento")
       .select("proceso_id")
@@ -240,7 +243,9 @@ export default function AdminPage() {
       .not("proceso_id", "is", null)
     const idsExcluir = solicitudesActivas?.map(s => s.proceso_id) || []
     let procesosQuery = supabase.from("procesos").select("*").order("updated_at", { ascending: false })
-    if (idsExcluir.length > 0) procesosQuery = procesosQuery.not("id", "in", `(${idsExcluir.join(",")})`)
+    if (idsExcluir.length > 0) {
+      procesosQuery = procesosQuery.not("id", "in", `(${idsExcluir.join(",")})`)
+    }
     const [{ data: c }, { data: p }, { data: f }, { data: s }] = await Promise.all([
       supabase.from("clientes").select("*").order("nombre"),
       procesosQuery,
@@ -430,7 +435,10 @@ export default function AdminPage() {
         <div className="max-w-[1400px] w-full mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4"><span className="font-display text-xl font-black"><span className="text-white">sof</span><span className="text-[#3b82f6]">ia</span></span><span className="text-[10px] text-[#525a68] uppercase">Admin · OC Consultores</span></div>
           <div className="flex items-center gap-4">
-            <div className="relative"><button onClick={()=>setMostrarNotis(!mostrarNotis)} className="relative p-1.5 rounded-lg bg-[#1c2028] border border-[#252932] text-[#8b919e] hover:text-white transition-all"><Bell size={16} />{notificaciones.length>0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] flex items-center justify-center">{notificaciones.length}</span>}</button>{mostrarNotis && <div className="absolute right-0 mt-2 w-80 bg-[#111318] border border-[#252932] rounded-xl shadow-xl z-50 p-2"><div className="text-xs font-bold text-[#525a68] p-2 border-b border-[#252932]">Actividad reciente</div>{notificaciones.length===0?<p className="text-xs text-[#525a68] p-3">Sin novedades</p>:notificaciones.map(n=>{const proc=procesos.find(p=>p.id===n.proceso_id);return <div key={n.id} className="text-xs p-2 border-b border-[#252932]"><span className="text-[#60a5fa]">{n.accion==="interesado"?"⭐ Interés":"📤 Enviado a SOFIA"}</span><div className="text-[#8b919e]">{proc?.entidad || proc?.referencia}</div><div className="text-[10px] text-[#525a68]">{new Date(n.created_at).toLocaleString()}</div></div>})}</div>}</div>
+            <div className="relative">
+              <button onClick={()=>setMostrarNotis(!mostrarNotis)} className="relative p-1.5 rounded-lg bg-[#1c2028] border border-[#252932] text-[#8b919e] hover:text-white transition-all"><Bell size={16} />{notificaciones.length>0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] flex items-center justify-center">{notificaciones.length}</span>}</button>
+              {mostrarNotis && <div className="absolute right-0 mt-2 w-80 bg-[#111318] border border-[#252932] rounded-xl shadow-xl z-50 p-2"><div className="text-xs font-bold text-[#525a68] p-2 border-b border-[#252932]">Actividad reciente</div>{notificaciones.length===0?<p className="text-xs text-[#525a68] p-3">Sin novedades</p>:notificaciones.map(n=>{const proc=procesos.find(p=>p.id===n.proceso_id);return <div key={n.id} className="text-xs p-2 border-b border-[#252932]"><span className="text-[#60a5fa]">{n.accion==="interesado"?"⭐ Interés":"📤 Enviado a SOFIA"}</span><div className="text-[#8b919e]">{proc?.entidad || proc?.referencia}</div><div className="text-[10px] text-[#525a68]">{new Date(n.created_at).toLocaleString()}</div></div>})}</div>}
+            </div>
             <button onClick={()=>router.push("/dashboard")} className="text-xs px-3 py-1 bg-transparent border border-[#252932] rounded">Dashboard</button>
             <button onClick={()=>{sessionStorage.removeItem("secop_admin");router.push("/login")}} className="text-xs px-3 py-1 bg-transparent border border-[#252932] rounded">Salir</button>
           </div>
@@ -438,6 +446,7 @@ export default function AdminPage() {
       </nav>
 
       <div className="max-w-[1400px] mx-auto p-6">
+        {/* Stats row */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Clientes activos</div><div className="text-2xl font-bold text-[#60a5fa]">{activos}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Total procesos</div><div className="text-2xl font-bold text-[#22c55e]">{procesos.length}</div></div>
@@ -445,19 +454,22 @@ export default function AdminPage() {
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Presupuesto interesado</div><div className="text-sm font-bold text-[#34d399]">{fmt(presTotalInteres)}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Feedback hoy</div><div className="text-2xl font-bold text-[#f472b6]">{feedback.filter(f=>f.created_at?.startsWith(new Date().toISOString().slice(0,10))).length}</div></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Manuales</div><div className="text-2xl font-bold text-[#a78bfa]">{procesos.filter(p=>p.es_manual).length}</div></div>
-          <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Tasa éxito</div><div className="text-2xl font-bold text-[#22c55e]">{tasaExito}%</div><div className="text-[9px]">{ganados} ganados / {radicados} radicados</div></div>
+          <div className="bg-[#15181f] border border-[#252932] rounded-xl p-3"><div className="text-[10px] text-[#525a68] uppercase">Tasa éxito (radicados)</div><div className="text-2xl font-bold text-[#22c55e]">{tasaExito}%</div><div className="text-[9px]">{ganados} ganados / {radicados} radicados</div></div>
         </div>
 
+        {/* Gráficos */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-4"><h3 className="text-sm font-bold flex items-center gap-2 mb-3"><TrendingUp size={14} className="text-[#3b82f6]"/>Evolución últimos 7 días</h3><ResponsiveContainer width="100%" height={200}><LineChart data={evolucionEstados}><XAxis dataKey="dia" stroke="#525a68" fontSize={10}/><YAxis stroke="#525a68" fontSize={10}/><Tooltip contentStyle={{backgroundColor:'#1c2028', border:'none', borderRadius:8}}/><Line type="monotone" dataKey="nuevos" stroke="#3b82f6" name="Nuevos"/><Line type="monotone" dataKey="interesados" stroke="#f59e0b" name="Interesados"/></LineChart></ResponsiveContainer></div>
           <div className="bg-[#15181f] border border-[#252932] rounded-xl p-4"><h3 className="text-sm font-bold flex items-center gap-2 mb-3"><DollarSign size={14} className="text-[#22c55e]"/>Top clientes por presupuesto interesado</h3><div className="space-y-2">{topClientes.map(c=> <div key={c.nombre} className="flex justify-between text-xs"><span>{c.nombre}</span><span className="text-[#22c55e]">{fmt(c.total)}</span></div>)}</div></div>
         </div>
 
+        {/* Filtros */}
         <div className="flex flex-wrap gap-3 items-center justify-between mb-4">
           <div className="flex gap-2"><select value={clienteSel || ""} onChange={e=>setClienteSel(e.target.value||null)} className="bg-[#15181f] border border-[#252932] rounded-lg p-2 text-sm"><option value="">Todos los clientes</option>{clientes.map(c=><option key={c.id} value={c.id}>{c.nombre} {!c.activo?"(inactivo)":""}</option>)}</select><select value={estadoSel} onChange={e=>setEstadoSel(e.target.value)} className="bg-[#15181f] border border-[#252932] rounded-lg p-2 text-sm"><option value="todos">Todos los estados</option><option value="nuevo">Nuevos</option><option value="interesado">Interesados</option><option value="descartado">Descartados</option></select><input type="text" placeholder="Buscar..." value={busqueda} onChange={e=>setBusqueda(e.target.value)} className="bg-[#15181f] border border-[#252932] rounded-lg p-2 text-sm w-48" /></div>
           <div className="flex gap-2"><button onClick={()=>setShowNuevoProceso(true)} className="text-xs px-3 py-1.5 bg-[#22c55e]/20 border border-[#22c55e]/40 rounded text-[#22c55e]">+ Proceso manual</button><button onClick={()=>{ setPrefillCliente(undefined); setShowNuevoCliente(true); }} className="text-xs px-3 py-1.5 bg-[#3b82f6]/20 border border-[#3b82f6]/40 rounded text-[#3b82f6]">+ Nuevo cliente</button></div>
         </div>
 
+        {/* Tabs */}
         <div className="flex gap-2 border-b border-[#252932] mb-4">
           {["procesos","clientes","feedback","solicitudes"].map(t=> <button key={t} onClick={()=>setTab(t)} className={`px-4 py-2 text-sm font-medium ${tab===t ? "text-[#3b82f6] border-b-2 border-[#3b82f6]" : "text-[#8b919e]"}`}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
         </div>
@@ -510,7 +522,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB CLIENTES (simplificado pero funcional) */}
+        {/* TAB CLIENTES */}
         {tab === "clientes" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {clientesFilt.map(c=>(
@@ -525,44 +537,123 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB FEEDBACK */}
+        {/* TAB FEEDBACK (corregido) */}
         {tab === "feedback" && (
           <div className="bg-[#15181f] border border-[#252932] rounded-xl overflow-auto">
-            <table className="w-full text-sm"><thead className="border-b border-[#252932]"><tr>{["Cliente","Proceso","Acción","Nota","Fecha"].map(h => <th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>)}</thead>
-            <tbody>{feedback.slice(0,100).map(f => { const proc = procesos.find(p => p.id === f.proceso_id); return <tr key={f.id} className="border-b border-[#1c2028]"><td className="p-2 text-[11px] text-[#60a5fa]">{f.cliente_id || "—"}</td><td className="p-2 text-[10px] max-w-40 truncate">{proc?.entidad || f.proceso_id}</td><td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>{f.accion}</span></td><td className="p-2 text-[11px]">{f.nota || "—"}</td><td className="p-2 text-[10px] text-[#525a68]">{new Date(f.created_at).toLocaleDateString()}</td>}</tr>})}</tbody><tr>
+            <table className="w-full text-sm">
+              <thead className="border-b border-[#252932]">
+                <tr>
+                  {["Cliente","Proceso","Acción","Nota","Fecha"].map(h => (
+                    <th key={h} className="p-2 text-left text-[10px] text-[#525a68]">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {feedback.slice(0,100).map(f => {
+                  const proc = procesos.find(p => p.id === f.proceso_id)
+                  return (
+                    <tr key={f.id} className="border-b border-[#1c2028]">
+                      <td className="p-2 text-[11px] text-[#60a5fa]">{f.cliente_id || "—"}</td>
+                      <td className="p-2 text-[10px] max-w-40 truncate">{proc?.entidad || f.proceso_id}</td>
+                      <td className="p-2">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${f.accion==="interesado"?"bg-[#22c55e22] text-[#22c55e]":f.accion==="descartado"?"bg-red-500/20 text-red-400":"bg-[#3b82f6]/20 text-[#3b82f6]"}`}>
+                          {f.accion}
+                        </span>
+                      </td>
+                      <td className="p-2 text-[11px]">{f.nota || "—"}</td>
+                      <td className="p-2 text-[10px] text-[#525a68]">{new Date(f.created_at).toLocaleDateString()}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
 
         {/* TAB SOLICITUDES */}
         {tab === "solicitudes" && (
           <div className="space-y-4">
-            {solicitudes.length === 0 ? <div className="text-center py-12 text-[#525a68]">No hay solicitudes de acompañamiento.</div> : solicitudes.map(sol => {
-              const proceso = procesos.find(p => p.id === sol.proceso_id)
-              const clienteSol = clientes.find(c => c.id === sol.cliente_id)
-              if (!comentariosSolicitud[sol.id]) cargarComentariosSolicitud(sol.id)
-              const etapaActual = sol.etapa_actual ?? 0
-              const nombreEtapa = sol.etapa_nombre || ETAPAS[etapaActual]
-              return (
-                <div key={sol.id} className="bg-[#15181f] border border-[#252932] rounded-xl p-5">
-                  <div className="flex justify-between items-start flex-wrap gap-2 mb-3">
-                    <div><div className="font-bold text-white text-lg">{proceso?.entidad || "Proceso"}</div><div className="text-xs text-[#3b82f6] font-mono">{proceso?.referencia || sol.numero_proceso}</div><div className="text-xs text-[#525a68] mt-1">Cliente: {clienteSol?.nombre || sol.empresa}</div></div>
-                    <div className="flex gap-2"><select value={sol.estado} onChange={e => actualizarEstadoSolicitud(sol.id, e.target.value)} className="text-xs bg-[#1c2028] rounded px-2 py-1"><option value="pendiente">Pendiente</option><option value="en_proceso">En proceso</option><option value="atendida">Atendida</option></select><button onClick={() => { setPrefillCliente({ nombre: sol.empresa, descripcion_negocio: `Solicitud: ${sol.numero_proceso}`, email_destinatario: sol.empresa.includes('@') ? sol.empresa : undefined }); setShowNuevoCliente(true); }} className="text-xs bg-[#3b82f6] px-2 py-1 rounded">Crear cliente</button></div>
+            {solicitudes.length === 0 ? (
+              <div className="text-center py-12 text-[#525a68]">No hay solicitudes de acompañamiento.</div>
+            ) : (
+              solicitudes.map(sol => {
+                const proceso = procesos.find(p => p.id === sol.proceso_id)
+                const clienteSol = clientes.find(c => c.id === sol.cliente_id)
+                if (!comentariosSolicitud[sol.id]) cargarComentariosSolicitud(sol.id)
+                const etapaActual = sol.etapa_actual ?? 0
+                const nombreEtapa = sol.etapa_nombre || ETAPAS[etapaActual]
+                return (
+                  <div key={sol.id} className="bg-[#15181f] border border-[#252932] rounded-xl p-5">
+                    <div className="flex justify-between items-start flex-wrap gap-2 mb-3">
+                      <div>
+                        <div className="font-bold text-white text-lg">{proceso?.entidad || "Proceso"}</div>
+                        <div className="text-xs text-[#3b82f6] font-mono">{proceso?.referencia || sol.numero_proceso}</div>
+                        <div className="text-xs text-[#525a68] mt-1">Cliente: {clienteSol?.nombre || sol.empresa}</div>
+                      </div>
+                      <div className="flex gap-2">
+                        <select value={sol.estado} onChange={e => actualizarEstadoSolicitud(sol.id, e.target.value)} className="text-xs bg-[#1c2028] rounded px-2 py-1">
+                          <option value="pendiente">Pendiente</option><option value="en_proceso">En proceso</option><option value="atendida">Atendida</option>
+                        </select>
+                        <button onClick={() => { setPrefillCliente({ nombre: sol.empresa, descripcion_negocio: `Solicitud: ${sol.numero_proceso}`, email_destinatario: sol.empresa.includes('@') ? sol.empresa : undefined }); setShowNuevoCliente(true); }} className="text-xs bg-[#3b82f6] px-2 py-1 rounded">Crear cliente</button>
+                      </div>
+                    </div>
+                    <div className="bg-[#1c2028] rounded-lg p-3 mb-4">
+                      <p className="text-sm text-[#8b919e]">{proceso?.objeto || sol.observaciones}</p>
+                      <div className="flex gap-3 mt-2 text-xs">
+                        {proceso?.departamento && <span><MapPin size={12} className="inline mr-1" />{proceso.departamento}</span>}
+                        {proceso?.modalidad && <span><Briefcase size={12} className="inline mr-1" />{proceso.modalidad}</span>}
+                        <span className="text-[#22c55e]">{fmt(proceso?.presupuesto)}</span>
+                      </div>
+                      {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-[#60a5fa] block mt-2">Ver SECOP ↗</a>}
+                    </div>
+                    <div className="border-t border-[#252932] pt-3 mb-3">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-[#3b82f6] uppercase">Seguimiento de gestión</span>
+                        <div className="flex items-center gap-2">
+                          <input type="text" value={nombreEtapa} onChange={(e) => actualizarNombreEtapaSolicitud(sol.id, e.target.value)} className="text-[10px] bg-[#1c2028] rounded px-2 py-1 text-[#f59e0b] w-36 text-center" placeholder="Nombre personalizado" />
+                          <span className="text-[9px] text-[#525a68]">(estándar: {ETAPAS[etapaActual]})</span>
+                        </div>
+                      </div>
+                      <TimelineAdmin procesoId={sol.id} etapa={etapaActual} onUpdate={async (id, etapaNueva) => {
+                        await supabase.from("solicitudes_acompanamiento").update({ etapa_actual: etapaNueva }).eq("id", id)
+                        setSolicitudes(prev => prev.map(s => s.id === id ? { ...s, etapa_actual: etapaNueva } : s))
+                        mostrarToast(`Etapa actualizada a ${ETAPAS[etapaNueva]}`)
+                      }} />
+                      <div className="mt-2 flex gap-2">
+                        <button onClick={() => setEditarFechasEtapa({ solicitudId: sol.id, etapa: etapaActual })} className="text-xs bg-[#1c2028] px-2 py-1 rounded"><Calendar size={10} className="inline mr-1" /> Fecha etapa</button>
+                      </div>
+                      {editarFechasEtapa?.solicitudId === sol.id && (
+                        <div className="mt-2 p-2 bg-[#1c2028] rounded flex gap-2">
+                          <input type="datetime-local" value={fechaTemp} onChange={e => setFechaTemp(e.target.value)} className="text-xs bg-[#0a0c10] p-1 rounded" />
+                          <button onClick={() => guardarFechaEtapaSolicitud(sol.id, editarFechasEtapa.etapa, fechaTemp)} className="text-xs bg-[#22c55e] px-2 py-1 rounded">Guardar</button>
+                          <button onClick={() => setEditarFechasEtapa(null)} className="text-xs bg-[#252932] px-2 py-1 rounded">Cancelar</button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="border-t border-[#252932] pt-3">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-[#60a5fa] flex items-center gap-1"><MessageSquare size={12}/> Comentarios ({comentariosSolicitud[sol.id]?.length || 0})</span>
+                      </div>
+                      <div className="space-y-2 max-h-40 overflow-y-auto mb-2">
+                        {(comentariosSolicitud[sol.id] || []).map(c => (
+                          <div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-[#3b82f6]/10 border-l-2 border-[#3b82f6]' : 'bg-[#1c2028]'}`}>
+                            <div className="flex justify-between text-[10px] text-[#525a68]">
+                              <span className="font-bold">{c.autor === 'admin' ? 'Admin' : clienteSol?.nombre || 'Cliente'}</span>
+                              <span>{new Date(c.created_at).toLocaleString()}</span>
+                            </div>
+                            <p className="text-white/80">{c.texto}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex gap-1">
+                        <input type="text" placeholder="Escribe una respuesta..." className="flex-1 text-xs bg-[#1c2028] p-2 rounded" value={nuevoComentarioSolicitud[sol.id] || ""} onChange={e => setNuevoComentarioSolicitud({...nuevoComentarioSolicitud, [sol.id]: e.target.value})} onKeyDown={e => { if (e.key === 'Enter') enviarComentarioSolicitud(sol.id, sol.cliente_id) }} />
+                        <button onClick={() => enviarComentarioSolicitud(sol.id, sol.cliente_id)} className="bg-[#3b82f6] text-xs px-3 py-1 rounded">Enviar</button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="bg-[#1c2028] rounded-lg p-3 mb-4"><p className="text-sm text-[#8b919e]">{proceso?.objeto || sol.observaciones}</p><div className="flex gap-3 mt-2 text-xs">{proceso?.departamento && <span><MapPin size={12} className="inline mr-1" />{proceso.departamento}</span>}{proceso?.modalidad && <span><Briefcase size={12} className="inline mr-1" />{proceso.modalidad}</span>}<span className="text-[#22c55e]">{fmt(proceso?.presupuesto)}</span></div>{sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-[#60a5fa] block mt-2">Ver SECOP ↗</a>}</div>
-                  <div className="border-t border-[#252932] pt-3 mb-3">
-                    <div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-[#3b82f6] uppercase">Seguimiento de gestión</span><div className="flex items-center gap-2"><input type="text" value={nombreEtapa} onChange={(e) => actualizarNombreEtapaSolicitud(sol.id, e.target.value)} className="text-[10px] bg-[#1c2028] rounded px-2 py-1 text-[#f59e0b] w-36 text-center" placeholder="Nombre personalizado" /><span className="text-[9px] text-[#525a68]">(estándar: {ETAPAS[etapaActual]})</span></div></div>
-                    <TimelineAdmin procesoId={sol.id} etapa={etapaActual} onUpdate={async (id, etapaNueva) => { await supabase.from("solicitudes_acompanamiento").update({ etapa_actual: etapaNueva }).eq("id", id); setSolicitudes(prev => prev.map(s => s.id === id ? { ...s, etapa_actual: etapaNueva } : s)); mostrarToast(`Etapa actualizada a ${ETAPAS[etapaNueva]}`); }} />
-                    <div className="mt-2 flex gap-2"><button onClick={() => setEditarFechasEtapa({ solicitudId: sol.id, etapa: etapaActual })} className="text-xs bg-[#1c2028] px-2 py-1 rounded"><Calendar size={10} className="inline mr-1" /> Fecha etapa</button></div>
-                    {editarFechasEtapa?.solicitudId === sol.id && (<div className="mt-2 p-2 bg-[#1c2028] rounded flex gap-2"><input type="datetime-local" value={fechaTemp} onChange={e => setFechaTemp(e.target.value)} className="text-xs bg-[#0a0c10] p-1 rounded" /><button onClick={() => guardarFechaEtapaSolicitud(sol.id, editarFechasEtapa.etapa, fechaTemp)} className="text-xs bg-[#22c55e] px-2 py-1 rounded">Guardar</button><button onClick={() => setEditarFechasEtapa(null)} className="text-xs bg-[#252932] px-2 py-1 rounded">Cancelar</button></div>)}
-                  </div>
-                  <div className="border-t border-[#252932] pt-3">
-                    <div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-[#60a5fa] flex items-center gap-1"><MessageSquare size={12}/> Comentarios ({comentariosSolicitud[sol.id]?.length || 0})</span></div>
-                    <div className="space-y-2 max-h-40 overflow-y-auto mb-2">{(comentariosSolicitud[sol.id] || []).map(c => (<div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-[#3b82f6]/10 border-l-2 border-[#3b82f6]' : 'bg-[#1c2028]'}`}><div className="flex justify-between text-[10px] text-[#525a68]"><span className="font-bold">{c.autor === 'admin' ? 'Admin' : clienteSol?.nombre || 'Cliente'}</span><span>{new Date(c.created_at).toLocaleString()}</span></div><p className="text-white/80">{c.texto}</p></div>))}</div>
-                    <div className="flex gap-1"><input type="text" placeholder="Escribe una respuesta..." className="flex-1 text-xs bg-[#1c2028] p-2 rounded" value={nuevoComentarioSolicitud[sol.id] || ""} onChange={e => setNuevoComentarioSolicitud({...nuevoComentarioSolicitud, [sol.id]: e.target.value})} onKeyDown={e => { if (e.key === 'Enter') enviarComentarioSolicitud(sol.id, sol.cliente_id) }} /><button onClick={() => enviarComentarioSolicitud(sol.id, sol.cliente_id)} className="bg-[#3b82f6] text-xs px-3 py-1 rounded">Enviar</button></div>
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })
+            )}
           </div>
         )}
       </div>
@@ -576,9 +667,11 @@ export default function AdminPage() {
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setMostrarModalResultado(null)}>
           <div className="bg-[#111318] border border-[#252932] rounded-xl p-6 w-96" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold mb-4">Resultado final del proceso</h3>
-            <div className="space-y-3"><div><label className="text-xs block mb-1">Fecha esperada informe</label><input type="datetime-local" className="w-full p-2 bg-[#1c2028] rounded" value={fechaInformeTemp} onChange={e => setFechaInformeTemp(e.target.value)} /></div>
-            <div><label className="text-xs block mb-1">Resultado</label><select className="w-full p-2 bg-[#1c2028] rounded" value={resultadoTemp} onChange={e => setResultadoTemp(e.target.value as any)}><option value="">Seleccionar</option><option value="ganado">Ganado</option><option value="perdido">Perdido</option><option value="desierto">Desierto</option></select></div>
-            <div><label className="text-xs block mb-1">Nota (opcional)</label><textarea rows={2} className="w-full p-2 bg-[#1c2028] rounded" value={notaResultadoTemp} onChange={e => setNotaResultadoTemp(e.target.value)} /></div></div>
+            <div className="space-y-3">
+              <div><label className="text-xs block mb-1">Fecha esperada informe</label><input type="datetime-local" className="w-full p-2 bg-[#1c2028] rounded" value={fechaInformeTemp} onChange={e => setFechaInformeTemp(e.target.value)} /></div>
+              <div><label className="text-xs block mb-1">Resultado</label><select className="w-full p-2 bg-[#1c2028] rounded" value={resultadoTemp} onChange={e => setResultadoTemp(e.target.value as any)}><option value="">Seleccionar</option><option value="ganado">Ganado</option><option value="perdido">Perdido</option><option value="desierto">Desierto</option></select></div>
+              <div><label className="text-xs block mb-1">Nota (opcional)</label><textarea rows={2} className="w-full p-2 bg-[#1c2028] rounded" value={notaResultadoTemp} onChange={e => setNotaResultadoTemp(e.target.value)} /></div>
+            </div>
             <div className="flex gap-2 mt-4"><button onClick={() => setMostrarModalResultado(null)} className="flex-1 bg-[#252932] py-2 rounded">Cancelar</button><button onClick={() => guardarResultadoFinal(mostrarModalResultado)} className="flex-1 bg-[#3b82f6] py-2 rounded">Guardar</button></div>
           </div>
         </div>
