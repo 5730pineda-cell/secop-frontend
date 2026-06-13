@@ -1,6 +1,6 @@
 "use client"
 import { useState, useEffect } from "react"
-import { useRouter, useParams } "next/navigation"
+import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import type { Cliente, Proceso, Comentario, SolicitudAcompanamiento } from "@/types"
 import {
@@ -141,43 +141,20 @@ export default function PortalCliente() {
     if (ce || !c) { setError("Cliente no encontrado."); setLoading(false); return }
     setCliente(c)
 
-    // Limpiar vencidos
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "nuevo").lt("fecha_oferta", new Date().toISOString())
     const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
     await supabase.from("procesos").delete().eq("cliente_id", id).eq("estado", "descartado").lt("updated_at", hace30.toISOString())
 
-    // Obtener todas las solicitudes
     const { data: sol } = await supabase.from("solicitudes_acompanamiento").select("*").eq("cliente_id", id)
     setSolicitudes(sol || [])
 
-    // IDs de procesos que ya tienen solicitud activa (pendiente o en_proceso)
-    const idsExcluir = (sol || [])
-      .filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso')
-      .map(s => s.proceso_id)
-      .filter(Boolean) as string[]
-
+    const idsExcluir = (sol || []).filter(s => s.estado === 'pendiente' || s.estado === 'en_proceso').map(s => s.proceso_id).filter(Boolean) as string[]
     const hoy = new Date().toISOString()
-    // Todos los procesos (sin exclusión) para gráficos y para acompañamiento
-    const { data: allProcesos } = await supabase
-      .from("procesos")
-      .select("*")
-      .eq("cliente_id", id)
-      .neq("estado", "descartado")
-      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
-      .order("fecha_oferta", { ascending: true })
+    const { data: allProcesos } = await supabase.from("procesos").select("*").eq("cliente_id", id).neq("estado", "descartado").or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`).order("fecha_oferta", { ascending: true })
     setTodosProcesos(allProcesos || [])
 
-    // Procesos excluyendo los que están en acompañamiento activo (para pestañas Nuevos/Intereses)
-    let query = supabase
-      .from("procesos")
-      .select("*")
-      .eq("cliente_id", id)
-      .neq("estado", "descartado")
-      .or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`)
-      .order("fecha_oferta", { ascending: true })
-    if (idsExcluir.length > 0) {
-      query = query.not("id", "in", `(${idsExcluir.join(",")})`)
-    }
+    let query = supabase.from("procesos").select("*").eq("cliente_id", id).neq("estado", "descartado").or(`estado.eq.interesado,fecha_oferta.gt.${hoy}`).order("fecha_oferta", { ascending: true })
+    if (idsExcluir.length > 0) query = query.not("id", "in", `(${idsExcluir.join(",")})`)
     const { data: p } = await query
     setProcesos(p || [])
 
@@ -193,30 +170,23 @@ export default function PortalCliente() {
     }
   }
 
-  // --- Marcar interés ---
   async function marcarInteres(procesoId: string) {
     if (saving[procesoId]) return
     setSaving(prev => ({ ...prev, [procesoId]: true }))
     await supabase.from("procesos").update({ estado: "interesado", etapa_seguimiento: 0 }).eq("id", procesoId)
     await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "interesado" }])
-    // Actualización local
     setProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
     setTodosProcesos(prev => prev.map(x => x.id === procesoId ? { ...x, estado: "interesado", etapa_seguimiento: 0 } : x))
     mostrarToast("✓ Interés registrado", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
   }
 
-  // --- Enviar a acompañamiento (CORREGIDO: sin recarga, solo actualización local) ---
   async function enviarAcompanamiento(procesoId: string) {
     if (saving[procesoId]) return
     const proc = todosProcesos.find(x => x.id === procesoId)
-    if (!proc) {
-      mostrarToast("No se encontró el proceso", "error")
-      return
-    }
+    if (!proc) return
     setSaving(prev => ({ ...prev, [procesoId]: "acompanamiento" }))
 
-    // Insertar en la base de datos
     const { data: newSolicitud, error } = await supabase
       .from("solicitudes_acompanamiento")
       .insert({
@@ -233,50 +203,36 @@ export default function PortalCliente() {
       .single()
 
     if (error) {
-      console.error("Error al insertar solicitud:", error)
       mostrarToast("Error: " + error.message, "error")
       setSaving(prev => ({ ...prev, [procesoId]: false }))
       return
     }
 
-    // ACTUALIZACIÓN LOCAL INMEDIATA (sin recargar)
-    // 1. Eliminar el proceso de `procesos` y `todosProcesos`
+    // Actualización optimista local
     setProcesos(prev => prev.filter(p => p.id !== procesoId))
     setTodosProcesos(prev => prev.filter(p => p.id !== procesoId))
-    // 2. Agregar la nueva solicitud al inicio de `solicitudes`
     setSolicitudes(prev => [newSolicitud, ...prev])
-    // 3. Cambiar a la pestaña de acompañamiento
     setTab("acompanamiento")
     mostrarToast("Solicitud enviada. El proceso ahora está en Acompañamiento.", "ok")
     setSaving(prev => ({ ...prev, [procesoId]: false }))
-
-    // Opcional: refrescar datos en segundo plano para sincronizar (sin bloquear UI)
-    cargar().catch(console.error)
+    cargar().catch(console.error) // sincronización en segundo plano
   }
 
-  // --- Descartar proceso ---
   async function descartar(procesoId: string) {
     setProcesoADescartar(null)
     const p = procesos.find(x => x.id === procesoId)
-    if (!p) return
-
-    setSaliendo(prev => ({ ...prev, [procesoId]: true }))
-    await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
-    await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
-
-    // Actualización local: mover a descartados y eliminar de las listas activas
-    const procesoDescartado = { ...p, estado: "descartado" }
-    setDescartados(prev => [procesoDescartado, ...prev])
-    setProcesos(prev => prev.filter(x => x.id !== procesoId))
-    setTodosProcesos(prev => prev.filter(x => x.id !== procesoId))
-
-    setTimeout(() => {
-      setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n })
-    }, 320)
-    mostrarToast("Proceso descartado", "info")
+    if (p) {
+      setSaliendo(prev => ({ ...prev, [procesoId]: true }))
+      await supabase.from("procesos").update({ estado: "descartado", updated_at: new Date().toISOString() }).eq("id", procesoId)
+      await supabase.from("feedback").insert([{ proceso_id: procesoId, cliente_id: id, accion: "descartado" }])
+      setDescartados(prev => [{ ...p, estado: "descartado" }, ...prev])
+      setProcesos(prev => prev.filter(x => x.id !== procesoId))
+      setTodosProcesos(prev => prev.filter(x => x.id !== procesoId))
+      setTimeout(() => setSaliendo(prev => { const n = { ...prev }; delete n[procesoId]; return n }), 320)
+      mostrarToast("Proceso descartado", "info")
+    }
   }
 
-  // --- Restaurar desde descartados ---
   async function restaurar(procesoId: string) {
     await supabase.from("procesos").update({ estado: "nuevo", updated_at: new Date().toISOString() }).eq("id", procesoId)
     const p = descartados.find(x => x.id === procesoId)
@@ -290,7 +246,6 @@ export default function PortalCliente() {
     setTab("nuevos")
   }
 
-  // --- Comentarios (sin cambios, pero asegurar que funcionen) ---
   async function cargarComentariosSolicitud(solicitudId: string) {
     const { data } = await supabase.from("comentarios").select("*").eq("solicitud_id", solicitudId).order("created_at", { ascending: true })
     if (data) setComentariosSolicitud(prev => ({ ...prev, [solicitudId]: data }))
@@ -314,7 +269,7 @@ export default function PortalCliente() {
   function mostrarToast(msg: string, tipo: string) { setToast({ msg, tipo }); setTimeout(() => setToast(null), 3800) }
   function limpiarFiltros() { setFDepto(""); setFEntidad(""); setFModalidad(""); setFPresMin(""); setFPresMax(""); setFTexto(""); setSearchTerm("") }
 
-  // Datos para gráficos (usando todosProcesos)
+  // Datos para gráficos
   const nuevos = todosProcesos.filter(p => p.estado === "nuevo")
   const interesados = todosProcesos.filter(p => p.estado === "interesado")
   const solicitudesActivas = solicitudes.filter(s => s.estado === "pendiente" || s.estado === "en_proceso")
@@ -324,29 +279,18 @@ export default function PortalCliente() {
   const presAnalisis = nuevos.reduce((sum, p) => sum + Number(p.presupuesto || 0), 0)
   const presTotal = presAnalisis + presInteresados + presAcompanamiento
 
-  // Tendencia (últimos 30 días)
   const fechaLimite = new Date(); fechaLimite.setDate(fechaLimite.getDate() - 30)
   const procesosTendencia = todosProcesos.filter(p => p.fecha_oferta && new Date(p.fecha_oferta) >= fechaLimite)
   const tendenciaMap = new Map<string, number>()
-  procesosTendencia.forEach(p => {
-    const fechaKey = new Date(p.fecha_oferta!).toISOString().split('T')[0]
-    tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1)
-  })
+  procesosTendencia.forEach(p => { const fechaKey = new Date(p.fecha_oferta!).toISOString().split('T')[0]; tendenciaMap.set(fechaKey, (tendenciaMap.get(fechaKey) || 0) + 1) })
   let tendenciaData = Array.from(tendenciaMap.entries()).map(([fecha, count]) => ({ fecha, count })).sort((a,b) => a.fecha.localeCompare(b.fecha))
   let trendData: { fecha: string; trend: number | null }[] = []
   if (tendenciaData.length >= 2) {
-    const n = tendenciaData.length
-    const indices = Array.from({ length: n }, (_, i) => i)
-    const sumX = indices.reduce((a,b) => a + b, 0)
-    const sumY = tendenciaData.reduce((a,b) => a + b.count, 0)
-    const sumXY = indices.reduce((a, i) => a + i * tendenciaData[i].count, 0)
-    const sumX2 = indices.reduce((a, i) => a + i * i, 0)
-    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
-    const intercept = (sumY - slope * sumX) / n
-    trendData = tendenciaData.map((point, i) => ({
-      fecha: point.fecha,
-      trend: Math.max(0, slope * i + intercept)
-    }))
+    const n = tendenciaData.length, indices = Array.from({ length: n }, (_, i) => i)
+    const sumX = indices.reduce((a,b) => a + b, 0), sumY = tendenciaData.reduce((a,b) => a + b.count, 0)
+    const sumXY = indices.reduce((a, i) => a + i * tendenciaData[i].count, 0), sumX2 = indices.reduce((a, i) => a + i * i, 0)
+    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX), intercept = (sumY - slope * sumX) / n
+    trendData = tendenciaData.map((point, i) => ({ fecha: point.fecha, trend: Math.max(0, slope * i + intercept) }))
   }
 
   const deptoMap = new Map<string, number>()
@@ -421,7 +365,7 @@ export default function PortalCliente() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* COLUMNA IZQUIERDA - GRÁFICOS (sin cambios) */}
+          {/* COLUMNA IZQUIERDA - GRÁFICOS */}
           <div className="lg:col-span-3 space-y-5">
             {tendenciaData.length > 0 && (
               <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
@@ -502,15 +446,11 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {/* PESTAÑA ACOMPAÑAMIENTO (sin cambios en el render, solo usa los datos actualizados) */}
+            {/* PESTAÑA ACOMPAÑAMIENTO */}
             {tab === "acompanamiento" && (
               <div className="space-y-4">
                 {solicitudes.length === 0 ? (
-                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800">
-                    <div className="text-4xl mb-2">📋</div>
-                    <div className="text-gray-900 dark:text-white font-medium">No tienes solicitudes de acompañamiento</div>
-                    <div className="text-xs text-gray-500">Usa el botón "Enviar a SOFIA" en cualquier proceso.</div>
-                  </div>
+                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-4xl mb-2">📋</div><div className="text-gray-900 dark:text-white font-medium">No tienes solicitudes de acompañamiento</div><div className="text-xs text-gray-500">Usa el botón "Enviar a SOFIA" en cualquier proceso.</div></div>
                 ) : (
                   solicitudes.map(sol => {
                     const proceso = todosProcesos.find(p => p.id === sol.proceso_id) || descartados.find(p => p.id === sol.proceso_id)
@@ -522,67 +462,22 @@ export default function PortalCliente() {
                     return (
                       <div key={sol.id} className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:shadow-md transition-all">
                         <div className="flex justify-between items-start gap-4">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{proceso?.referencia || sol.numero_proceso}</span>
-                            </div>
-                            <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proceso?.entidad || "Proceso"}</h3>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso?.presupuesto)}</div>
-                            <div className="flex items-center justify-end gap-2 mt-1">
-                              <div className={`text-[10px] px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>
-                                {sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}
-                              </div>
-                              <button onClick={() => setCollapsedCards(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
-                                {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-                              </button>
-                            </div>
-                          </div>
+                          <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{proceso?.referencia || sol.numero_proceso}</span></div><h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-1 tracking-tight">{proceso?.entidad || "Proceso"}</h3></div>
+                          <div className="text-right flex-shrink-0"><div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(proceso?.presupuesto)}</div><div className="flex items-center justify-end gap-2 mt-1"><div className={`text-[10px] px-2 py-1 rounded-full ${sol.estado === 'pendiente' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : sol.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'}`}>{sol.estado === 'pendiente' ? 'Pendiente' : sol.estado === 'en_proceso' ? 'En proceso' : 'Atendida'}</div><button onClick={() => setCollapsedCards(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">{isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</button></div></div>
                         </div>
                         {!isCollapsed && (
                           <>
-                            <div className="mt-3">
-                              <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">{proceso?.objeto || sol.observaciones}</p>
-                              <div className="flex flex-wrap gap-2 mt-2">
-                                {proceso?.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {proceso.departamento}</span>}
-                                {proceso?.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {proceso.modalidad}</span>}
-                                {sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}
-                              </div>
-                            </div>
+                            <div className="mt-3"><p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">{proceso?.objeto || sol.observaciones}</p><div className="flex flex-wrap gap-2 mt-2">{proceso?.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {proceso.departamento}</span>}{proceso?.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {proceso.modalidad}</span>}{sol.enlace && <a href={sol.enlace} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Ver SECOP</a>}</div></div>
                             <div className="border-t border-gray-200 dark:border-gray-800 mt-4 pt-3">
-                              <div className="flex justify-between items-center mb-2">
-                                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span>
-                                <button onClick={() => setHideDetails(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">
-                                  {isDetailsHidden ? <Eye size={12} /> : <EyeOff size={12} />}
-                                  {isDetailsHidden ? "Mostrar" : "Ocultar"}
-                                </button>
-                              </div>
+                              <div className="flex justify-between items-center mb-2"><span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Gestión y comentarios</span><button onClick={() => setHideDetails(prev => ({ ...prev, [sol.id]: !prev[sol.id] }))} className="text-gray-500 hover:text-gray-700 text-xs flex items-center gap-1">{isDetailsHidden ? <Eye size={12} /> : <EyeOff size={12} />}{isDetailsHidden ? "Mostrar" : "Ocultar"}</button></div>
                               {!isDetailsHidden && (
                                 <>
                                   <Timeline etapa={etapaActual} />
-                                  {sol[`fecha_etapa_${etapaActual}`] && (
-                                    <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500 flex items-center gap-2">
-                                      <Calendar size={12} /> Fecha registrada: {new Date(sol[`fecha_etapa_${etapaActual}`]).toLocaleString()}
-                                    </div>
-                                  )}
-                                  <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500">
-                                    {etapaActual === 0 ? "El equipo OC iniciará el análisis pronto." : `Estamos en la etapa ${nombreEtapa}.`}
-                                  </div>
-                                  <div className="mt-4">
-                                    <span className="text-[11px] font-bold text-blue-600 flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
-                                    <div className="space-y-2 max-h-32 overflow-y-auto mb-2">
-                                      {(comentariosSolicitud[sol.id] || []).map(c => (
-                                        <div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                                          <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-500 mb-1"><span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Tú'}</span><span>{new Date(c.created_at).toLocaleString()}</span></div>
-                                          <p className="text-gray-800 dark:text-gray-200">{c.texto}</p>
-                                        </div>
-                                      ))}
-                                    </div>
-                                    <div className="flex gap-2">
-                                      <textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentarioSolicitud[sol.id] || ""} onChange={e => setNuevoComentarioSolicitud(prev => ({ ...prev, [sol.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentarioSolicitud(sol.id) } }} />
-                                      <button onClick={() => enviarComentarioSolicitud(sol.id)} disabled={enviandoComentarioSolicitud[sol.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button>
-                                    </div>
+                                  {sol[`fecha_etapa_${etapaActual}`] && (<div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500 flex items-center gap-2"><Calendar size={12} /> Fecha registrada: {new Date(sol[`fecha_etapa_${etapaActual}`]).toLocaleString()}</div>)}
+                                  <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-500">{etapaActual === 0 ? "El equipo OC iniciará el análisis pronto." : `Estamos en la etapa ${nombreEtapa}.`}</div>
+                                  <div className="mt-4"><span className="text-[11px] font-bold text-blue-600 flex items-center gap-1 mb-2"><MessageSquare size={12}/> Comentarios</span>
+                                    <div className="space-y-2 max-h-32 overflow-y-auto mb-2">{(comentariosSolicitud[sol.id] || []).map(c => (<div key={c.id} className={`text-xs p-2 rounded ${c.autor === 'admin' ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500' : 'bg-gray-100 dark:bg-gray-800'}`}><div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-500 mb-1"><span className="font-bold">{c.autor === 'admin' ? 'OC Consultores' : 'Tú'}</span><span>{new Date(c.created_at).toLocaleString()}</span></div><p className="text-gray-800 dark:text-gray-200">{c.texto}</p></div>))}</div>
+                                    <div className="flex gap-2"><textarea rows={1} placeholder="Escribe un comentario o consulta..." className="flex-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-gray-900 dark:text-white text-xs resize-none" value={nuevoComentarioSolicitud[sol.id] || ""} onChange={e => setNuevoComentarioSolicitud(prev => ({ ...prev, [sol.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarComentarioSolicitud(sol.id) } }} /><button onClick={() => enviarComentarioSolicitud(sol.id)} disabled={enviandoComentarioSolicitud[sol.id]} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-bold transition"><Send size={12}/></button></div>
                                   </div>
                                 </>
                               )}
@@ -600,43 +495,18 @@ export default function PortalCliente() {
             {(tab === "nuevos" || tab === "interesado") && (
               <div className="space-y-4">
                 {listaActual.length === 0 ? (
-                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800">
-                    <div className="text-4xl mb-2">{tab === "interesado" ? "⭐" : "📋"}</div>
-                    <div className="text-gray-900 dark:text-white font-medium">No hay procesos para mostrar</div>
-                    <div className="text-xs text-gray-500">Los procesos enviados a acompañamiento están en su propia pestaña.</div>
-                  </div>
+                  <div className="text-center py-12 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800"><div className="text-4xl mb-2">{tab === "interesado" ? "⭐" : "📋"}</div><div className="text-gray-900 dark:text-white font-medium">No hay procesos para mostrar</div><div className="text-xs text-gray-500">Los procesos enviados a acompañamiento están en su propia pestaña.</div></div>
                 ) : (
                   listaActual.map(p => {
-                    const dias = diasRestantes(p.fecha_oferta)
-                    const urgente = dias !== null && dias <= 3 && dias >= 0
-                    const isInt = p.estado === "interesado"
-                    const isSaving = saving[p.id]
-                    const isSaliendo = saliendo[p.id]
+                    const dias = diasRestantes(p.fecha_oferta), urgente = dias !== null && dias <= 3 && dias >= 0, isInt = p.estado === "interesado", isSaving = saving[p.id], isSaliendo = saliendo[p.id]
                     return (
                       <div key={p.id} className={`bg-white dark:bg-gray-900/60 rounded-xl border transition-all duration-300 ${isSaliendo ? "opacity-0 scale-95 transition-all" : ""} ${isInt ? "border-blue-300 dark:border-blue-800" : urgente ? "border-amber-300 dark:border-amber-800" : "border-gray-200 dark:border-gray-800"} p-5 shadow-sm hover:shadow-md`}>
                         <div className="flex justify-between items-start gap-4">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{p.referencia}</span>
-                              {urgente && <span className="text-[10px] font-mono text-amber-800 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full animate-pulse">⚡ Cierre urgente</span>}
-                            </div>
-                            <h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-2 tracking-tight">{p.entidad || "—"}</h3>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(p.presupuesto)}</div>
-                            <div className="flex flex-col items-end">
-                              <div className="flex items-center justify-end gap-1 mt-1"><Clock size={12} className="text-gray-500" /><span className={`text-[11px] font-mono ${urgente ? "text-amber-600 dark:text-amber-400" : "text-gray-500"}`}>Cierra en {dias}d</span></div>
-                              <div className="text-[9px] text-gray-400 font-mono">{formatFechaCorta(p.fecha_oferta)}</div>
-                            </div>
-                          </div>
+                          <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="text-[10px] font-mono text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">{p.referencia}</span>{urgente && <span className="text-[10px] font-mono text-amber-800 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full animate-pulse">⚡ Cierre urgente</span>}</div><h3 className="text-[15px] font-bold text-gray-900 dark:text-white mt-2 tracking-tight">{p.entidad || "—"}</h3></div>
+                          <div className="text-right flex-shrink-0"><div className="text-[22px] font-black text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">{fmt(p.presupuesto)}</div><div className="flex flex-col items-end"><div className="flex items-center justify-end gap-1 mt-1"><Clock size={12} className="text-gray-500" /><span className={`text-[11px] font-mono ${urgente ? "text-amber-600 dark:text-amber-400" : "text-gray-500"}`}>Cierra en {dias}d</span></div><div className="text-[9px] text-gray-400 font-mono">{formatFechaCorta(p.fecha_oferta)}</div></div></div>
                         </div>
                         <p className="text-[13px] text-gray-600 dark:text-gray-400 leading-relaxed mt-3 line-clamp-2">{p.objeto || "Sin descripción"}</p>
-                        <div className="flex flex-wrap gap-2 mt-3">
-                          {p.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {p.departamento}</span>}
-                          {p.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {p.modalidad}</span>}
-                          {p.resultado_ia && <span className="text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md">✓ IA</span>}
-                          {isInt && <span className="text-[11px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-md border border-blue-200 dark:border-blue-800">✓ Me interesa</span>}
-                        </div>
+                        <div className="flex flex-wrap gap-2 mt-3">{p.departamento && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><MapPin size={10} /> {p.departamento}</span>}{p.modalidad && <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"><Briefcase size={10} /> {p.modalidad}</span>}{p.resultado_ia && <span className="text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-md">✓ IA</span>}{isInt && <span className="text-[11px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-md border border-blue-200 dark:border-blue-800">✓ Me interesa</span>}</div>
                         <div className="flex flex-wrap items-center gap-2 pt-4 border-t border-gray-200 dark:border-gray-800 mt-3">
                           {!isInt && (<button className="btn flex items-center gap-2 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold px-4 py-2 rounded-lg transition-all" onClick={() => marcarInteres(p.id)} disabled={!!isSaving}>{isSaving && isSaving !== "acompanamiento" ? "..." : "✓ Me interesa"}</button>)}
                           <button className="btn flex items-center gap-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white text-[12px] font-bold px-4 py-2 rounded-lg transition-all shadow-sm" onClick={() => enviarAcompanamiento(p.id)} disabled={isSaving === "acompanamiento"}><HelpCircle size={14} /> {isSaving === "acompanamiento" ? "Enviando..." : "Enviar a SOFIA"}</button>
@@ -662,22 +532,9 @@ export default function PortalCliente() {
 
           {/* COLUMNA DERECHA */}
           <div className="lg:col-span-3 space-y-5">
-            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-              <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2>
-              <div className="space-y-2">
-                {[...todosProcesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}
-              </div>
-            </div>
-            {topEntidades.length > 0 && (
-              <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-                <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-amber-500"/>Top entidades por presupuesto</h2>
-                <div className="space-y-2">{topEntidades.map((e, i) => (<div key={i} className="flex justify-between items-center text-xs"><span className="truncate w-32 text-gray-700 dark:text-gray-300">{e.name}</span><span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(e.total)}</span></div>))}</div>
-              </div>
-            )}
-            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
-              <h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2>
-              <div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{todosProcesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div>
-            </div>
+            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-emerald-600"/>Top Oportunidades</h2><div className="space-y-2">{[...todosProcesos].sort((a,b)=>(b.presupuesto||0)-(a.presupuesto||0)).slice(0,4).map((opp,idx)=>{const dias=diasRestantes(opp.fecha_oferta);return (<a key={idx} href={opp.url||"#"} target="_blank" rel="noreferrer" className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer group"><div className="flex-1 min-w-0"><p className="text-[12px] font-medium text-gray-900 dark:text-white truncate">{opp.entidad||"—"}</p><div className="flex items-center gap-2 mt-0.5"><span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">{fmt(opp.presupuesto)}</span>{dias!==null && <span className={`text-[10px] font-mono ${dias<=3?"text-amber-600 dark:text-amber-400":"text-gray-500"}`}>⏳ {dias}d</span>}</div><div className="text-[9px] text-gray-400">{formatFechaCorta(opp.fecha_oferta)}</div></div><ExternalLink size={14} className="text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" /></a>)})}</div></div>
+            {topEntidades.length > 0 && (<div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={12} className="text-amber-500"/>Top entidades por presupuesto</h2><div className="space-y-2">{topEntidades.map((e, i) => (<div key={i} className="flex justify-between items-center text-xs"><span className="truncate w-32 text-gray-700 dark:text-gray-300">{e.name}</span><span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(e.total)}</span></div>))}</div></div>)}
+            <div className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm"><h2 className="text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={12} className="text-blue-600"/>Actividad Reciente</h2><div className="space-y-3"><div className="flex items-start gap-3 pb-3 border-b border-gray-200 dark:border-gray-800"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><CheckCircle size={12} className="text-blue-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Portal actualizado</p><p className="text-[11px] text-gray-500">Nuevos procesos cargados</p><span className="text-[9px] text-gray-400 font-mono">hoy</span></div></div><div className="flex items-start gap-3"><div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0"><Send size={12} className="text-emerald-600" /></div><div><p className="text-[12px] text-gray-900 dark:text-white">Análisis IA completado</p><p className="text-[11px] text-gray-500">{todosProcesos.length} procesos evaluados</p><span className="text-[9px] text-gray-400 font-mono">hace 1h</span></div></div></div></div>
             {cliente?.drive_url && (<a href={cliente.drive_url} target="_blank" rel="noreferrer" className="bg-white dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 p-4 flex items-center gap-3 hover:shadow-sm transition-all"><FolderOpen size={18} className="text-blue-600" /><div><p className="text-[12px] font-medium text-gray-900 dark:text-white">Google Drive</p><p className="text-[10px] text-gray-500">Mis documentos</p></div></a>)}
           </div>
         </div>
